@@ -199,6 +199,10 @@ const PortfolioPage: React.FC = () => {
     broker: 'Demo',
     market: 'cn' as 'cn' | 'hk' | 'us',
     baseCurrency: 'CNY',
+    accountType: 'cash' as 'cash' | 'margin',
+    marginInterestRate: '',
+    securitiesInterestRate: '',
+    marginRatio: '',
   });
   const [costMethod, setCostMethod] = useState<PortfolioCostMethod>('fifo');
   const [snapshot, setSnapshot] = useState<PortfolioSnapshotResponse | null>(null);
@@ -260,6 +264,18 @@ const PortfolioPage: React.FC = () => {
     actionType: 'cash_dividend' as PortfolioCorporateActionType,
     cashDividendPerShare: '',
     splitRatio: '',
+    note: '',
+  });
+
+  // 2026-05-06: 融资融券交易表单
+  const [marginForm, setMarginForm] = useState({
+    symbol: '',
+    side: 'margin_buy' as 'margin_buy' | 'short_sell' | 'margin_repay' | 'short_cover',
+    quantity: '',
+    price: '',
+    interestRate: '',
+    fee: '',
+    tax: '',
     note: '',
   });
 
@@ -569,6 +585,33 @@ const PortfolioPage: React.FC = () => {
     }
   };
 
+  // 2026-05-06: 融资融券交易提交
+  const handleMarginTradeSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!writableAccountId) {
+      setWriteWarning('请先在右上角选择具体账户，再进行录入或导入提交。');
+      return;
+    }
+    try {
+      setWriteWarning(null);
+      await portfolioApi.recordMarginTrade({
+        accountId: writableAccountId,
+        symbol: marginForm.symbol,
+        side: marginForm.side,
+        quantity: Number(marginForm.quantity),
+        price: Number(marginForm.price),
+        interestRate: Number(marginForm.interestRate),
+        fee: Number(marginForm.fee || 0),
+        tax: Number(marginForm.tax || 0),
+        note: marginForm.note || undefined,
+      });
+      await refreshPortfolioData();
+      setMarginForm((prev) => ({ ...prev, symbol: '', note: '' }));
+    } catch (err) {
+      setError(getParsedApiError(err));
+    }
+  };
+
   const handleParseCsv = async () => {
     if (!csvFile) return;
     try {
@@ -660,6 +703,10 @@ const PortfolioPage: React.FC = () => {
         broker: accountForm.broker.trim() || undefined,
         market: accountForm.market,
         baseCurrency: accountForm.baseCurrency.trim() || 'CNY',
+        accountType: accountForm.accountType,
+        marginInterestRate: accountForm.marginInterestRate ? parseFloat(accountForm.marginInterestRate) : undefined,
+        securitiesInterestRate: accountForm.securitiesInterestRate ? parseFloat(accountForm.securitiesInterestRate) : undefined,
+        marginRatio: accountForm.marginRatio ? parseFloat(accountForm.marginRatio) : undefined,
       });
       await loadAccounts();
       setSelectedAccount(created.id);
@@ -670,6 +717,10 @@ const PortfolioPage: React.FC = () => {
         broker: 'Demo',
         market: accountForm.market,
         baseCurrency: accountForm.baseCurrency,
+        accountType: 'cash',
+        marginInterestRate: '',
+        securitiesInterestRate: '',
+        marginRatio: '',
       });
       setAccountCreateSuccess('账户创建成功，已自动切换到该账户。');
     } catch (err) {
@@ -933,6 +984,49 @@ const PortfolioPage: React.FC = () => {
               <option value="hk">市场：港股（hk）</option>
               <option value="us">市场：美股（us）</option>
             </select>
+            {/* 2026-05-06: 账户类型选择 */}
+            <select
+              className={PORTFOLIO_SELECT_CLASS}
+              value={accountForm.accountType}
+              onChange={(e) => setAccountForm((prev) => ({ ...prev, accountType: e.target.value as 'cash' | 'margin' }))}
+            >
+              <option value="cash">普通账户</option>
+              <option value="margin">融资融券账户</option>
+            </select>
+            {accountForm.accountType === 'margin' && (
+              <>
+                <input
+                  className={PORTFOLIO_INPUT_CLASS}
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  placeholder="融资年利率（如 0.068 表示 6.8%）"
+                  value={accountForm.marginInterestRate}
+                  onChange={(e) => setAccountForm((prev) => ({ ...prev, marginInterestRate: e.target.value }))}
+                />
+                <input
+                  className={PORTFOLIO_INPUT_CLASS}
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  placeholder="融券年利率（如 0.08 表示 8%）"
+                  value={accountForm.securitiesInterestRate}
+                  onChange={(e) => setAccountForm((prev) => ({ ...prev, securitiesInterestRate: e.target.value }))}
+                />
+                <input
+                  className={PORTFOLIO_INPUT_CLASS}
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="1"
+                  placeholder="保证金比例（如 0.5 表示 50%）"
+                  value={accountForm.marginRatio}
+                  onChange={(e) => setAccountForm((prev) => ({ ...prev, marginRatio: e.target.value }))}
+                />
+              </>
+            )}
             <button type="submit" className="btn-secondary text-sm" disabled={accountCreating}>
               {accountCreating ? '创建中...' : '创建账户'}
             </button>
@@ -1022,8 +1116,8 @@ const PortfolioPage: React.FC = () => {
                         className={`py-2 text-right ${
                           hasPositionPrice(row)
                             ? row.unrealizedPnlBase >= 0
-                              ? 'text-success'
-                              : 'text-danger'
+                              ? 'text-danger'  // 2026-05-06: 盈利显示红色（A股习惯）
+                              : 'text-success'  // 2026-05-06: 亏损显示绿色（A股习惯）
                             : 'text-secondary'
                         }`}
                       >
@@ -1033,8 +1127,8 @@ const PortfolioPage: React.FC = () => {
                         className={`py-2 text-right ${
                           hasPositionPrice(row) && row.unrealizedPnlPct !== null && row.unrealizedPnlPct !== undefined
                             ? row.unrealizedPnlPct >= 0
-                              ? 'text-success'
-                              : 'text-danger'
+                              ? 'text-danger'  // 2026-05-06: 盈利显示红色（A股习惯）
+                              : 'text-success'  // 2026-05-06: 亏损显示绿色（A股习惯）
                             : 'text-secondary'
                         }`}
                       >
@@ -1191,6 +1285,54 @@ const PortfolioPage: React.FC = () => {
             )}
             <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交企业行为</button>
           </form>
+        </Card>
+      </section>
+
+      {/* 2026-05-06: 融资融券交易录入 */}
+      <section className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+        <Card padding="md">
+          <h3 className="text-sm font-semibold text-foreground mb-3">手工录入：融资融券</h3>
+          <form className="space-y-2" onSubmit={handleMarginTradeSubmit}>
+            <input className={PORTFOLIO_INPUT_CLASS} placeholder="股票代码（例如 600519）" value={marginForm.symbol}
+              onChange={(e) => setMarginForm((prev) => ({ ...prev, symbol: e.target.value }))} required />
+            <select className={PORTFOLIO_SELECT_CLASS} value={marginForm.side}
+              onChange={(e) => setMarginForm((prev) => ({ ...prev, side: e.target.value as 'margin_buy' | 'short_sell' | 'margin_repay' | 'short_cover' }))}>
+              <option value="margin_buy">融资买入</option>
+              <option value="short_sell">融券卖出</option>
+              <option value="margin_repay">卖券还款</option>
+              <option value="short_cover">买券还券</option>
+            </select>
+            <div className="grid grid-cols-2 gap-2">
+              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="数量（必填）" value={marginForm.quantity}
+                onChange={(e) => setMarginForm((prev) => ({ ...prev, quantity: e.target.value }))} required />
+              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="成交价（必填）" value={marginForm.price}
+                onChange={(e) => setMarginForm((prev) => ({ ...prev, price: e.target.value }))} required />
+            </div>
+            <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="年利率（如 0.068 表示 6.8%）" value={marginForm.interestRate}
+              onChange={(e) => setMarginForm((prev) => ({ ...prev, interestRate: e.target.value }))} required />
+            <div className="grid grid-cols-2 gap-2">
+              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="手续费（可选）" value={marginForm.fee}
+                onChange={(e) => setMarginForm((prev) => ({ ...prev, fee: e.target.value }))} />
+              <input className={PORTFOLIO_INPUT_CLASS} type="number" min="0" step="0.0001" placeholder="税费（可选）" value={marginForm.tax}
+                onChange={(e) => setMarginForm((prev) => ({ ...prev, tax: e.target.value }))} />
+            </div>
+            <button type="submit" className="btn-secondary w-full" disabled={!writableAccountId}>提交融资融券交易</button>
+          </form>
+        </Card>
+
+        <Card padding="md">
+          <h3 className="text-sm font-semibold text-foreground mb-3">融资融券概览</h3>
+          <div className="text-xs text-secondary space-y-2">
+            <p>融资融券功能需要先创建融资融券账户。</p>
+            <p>支持的交易类型：</p>
+            <ul className="list-disc list-inside space-y-1 ml-2">
+              <li><strong>融资买入</strong>：向券商借钱买入股票</li>
+              <li><strong>融券卖出</strong>：向券商借股票卖出</li>
+              <li><strong>卖券还款</strong>：卖出股票偿还融资</li>
+              <li><strong>买券还券</strong>：买入股票偿还融券</li>
+            </ul>
+            <p className="mt-2">利息按日计算，年利率在账户创建时设置。</p>
+          </div>
         </Card>
       </section>
 

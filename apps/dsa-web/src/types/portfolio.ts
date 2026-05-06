@@ -3,28 +3,8 @@ export type PortfolioSide = 'buy' | 'sell';
 export type PortfolioCashDirection = 'in' | 'out';
 export type PortfolioCorporateActionType = 'cash_dividend' | 'split_adjustment';
 
-export interface PortfolioAccountItem {
-  id: number;
-  ownerId?: string | null;
-  name: string;
-  broker?: string | null;
-  market: 'cn' | 'hk' | 'us';
-  baseCurrency: string;
-  isActive: boolean;
-  createdAt?: string | null;
-  updatedAt?: string | null;
-}
-
 export interface PortfolioAccountListResponse {
   accounts: PortfolioAccountItem[];
-}
-
-export interface PortfolioAccountCreateRequest {
-  name: string;
-  broker?: string;
-  market: 'cn' | 'hk' | 'us';
-  baseCurrency: string;
-  ownerId?: string;
 }
 
 export interface PortfolioPositionItem {
@@ -302,4 +282,126 @@ export interface PortfolioFxRefreshResponse {
   updatedCount: number;
   staleCount: number;
   errorCount: number;
+}
+
+// ===================================
+// 2026-05-06: 融资融券相关类型
+// ===================================
+
+export type MarginSide = 'margin_buy' | 'short_sell' | 'margin_repay' | 'short_cover';
+export type MarginType = 'margin' | 'securities';
+
+export interface PortfolioAccountItem {
+  id: number;
+  ownerId?: string | null;
+  name: string;
+  broker?: string | null;
+  market: 'cn' | 'hk' | 'us';
+  baseCurrency: string;
+  isActive: boolean;
+  accountType: 'cash' | 'margin';
+  marginInterestRate?: number | null;
+  securitiesInterestRate?: number | null;
+  marginRatio?: number | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface PortfolioAccountCreateRequest {
+  name: string;
+  broker?: string;
+  market: 'cn' | 'hk' | 'us';
+  baseCurrency: string;
+  ownerId?: string;
+  accountType?: 'cash' | 'margin';
+  marginInterestRate?: number;
+  securitiesInterestRate?: number;
+  marginRatio?: number;
+}
+
+export interface MarginTradeCreateRequest {
+  accountId: number;
+  symbol: string;
+  market?: 'cn' | 'hk' | 'us';
+  side: MarginSide;
+  quantity: number;
+  price: number;
+  interestRate: number;
+  fee?: number;
+  tax?: number;
+  note?: string;
+}
+
+export interface MarginDetailItem {
+  id: number;
+  accountId: number;
+  tradeId?: number | null;
+  symbol: string;
+  market: string;
+  marginType: MarginType;
+  principal: number;
+  quantity?: number | null;
+  interestRate: number;
+  accruedInterest: number;
+  totalInterestPaid: number;
+  openDate: string;
+  closeDate?: string | null;
+  isOpen: boolean;
+  collateralValue?: number | null;
+  maintenanceRatio?: number | null;
+  note?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface MarginDetailListResponse {
+  items: MarginDetailItem[];
+  total: number;
+}
+
+export interface MarginSummary {
+  totalMarginPrincipal: number;
+  totalSecuritiesPrincipal: number;
+  totalInterestAccrued: number;
+  totalInterestPaid: number;
+  openMarginCount: number;
+  openSecuritiesCount: number;
+  maintenanceRatio?: number | null;
+  collateralValue?: number | null;
+}
+
+export interface MarginInterestItem {
+  detailId: number;
+  symbol: string;
+  marginType: string;
+  principal: number;
+  interestRate: number;
+  openDate: string;
+  daysHeld: number;
+  accruedInterest: number;
+  totalInterestPaid: number;
+}
+
+export interface MarginInterestResponse {
+  asOf: string;
+  items: MarginInterestItem[];
+  totalAccrued: number;
+}
+
+export interface MaintenanceRatioResponse {
+  accountId: number;
+  accountName: string;
+  totalAssets: number;
+  totalLiabilities: number;
+  netEquity: number;
+  maintenanceRatio?: number | null;
+  marginCallThreshold: number;
+  liquidationThreshold: number;
+  riskLevel: 'safe' | 'warning' | 'danger';
+}
+
+export interface MarginCloseRequest {
+  closeDate: string;
+  repayAmount?: number;
+  repayQuantity?: number;
 }

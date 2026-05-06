@@ -439,3 +439,124 @@ class PortfolioRiskService:
             "near_count": len(warnings),
             "items": warnings[:20],
         }
+
+    # ===================================
+    # 2026-05-06: 融资融券风险管理
+    # ===================================
+
+    def get_margin_risk_report(
+        self,
+        *,
+        account_id: int,
+        as_of: Optional[date] = None,
+    ) -> Dict[str, Any]:
+        """获取融资融券风险报告"""
+        as_of_date = as_of or date.today()
+
+        # 获取融资融券汇总
+        margin_summary = self.portfolio_service.get_margin_summary(account_id)
+
+        # 获取维持担保比例
+        maintenance = self.portfolio_service.get_maintenance_ratio(account_id)
+
+        # 获取利息信息
+        interest = self.portfolio_service.calculate_margin_interest(
+            account_id=account_id,
+            as_of_date=as_of_date,
+        )
+
+        # 风险阈值配置
+        margin_call_threshold = float(getattr(self.config, "portfolio_margin_call_threshold", 150.0))
+        liquidation_threshold = float(getattr(self.config, "portfolio_liquidation_threshold", 130.0))
+
+        # 计算风险等级
+        maintenance_ratio = maintenance.get("maintenance_ratio")
+        risk_level = "safe"
+        if maintenance_ratio is not None:
+            if maintenance_ratio < liquidation_threshold:
+                risk_level = "danger"
+            elif maintenance_ratio < margin_call_threshold:
+                risk_level = "warning"
+
+        # 计算距追保线和平仓线的距离
+        margin_call_distance = None
+        liquidation_distance = None
+        if maintenance_ratio is not None:
+            margin_call_distance = maintenance_ratio - margin_call_threshold
+            liquidation_distance = maintenance_ratio - liquidation_threshold
+
+        return {
+            "as_of": as_of_date.isoformat(),
+            "account_id": account_id,
+            "margin_summary": margin_summary,
+            "maintenance": {
+                "ratio": maintenance_ratio,
+                "total_assets": maintenance.get("total_assets", 0.0),
+                "total_liabilities": maintenance.get("total_liabilities", 0.0),
+                "net_equity": maintenance.get("net_equity", 0.0),
+                "risk_level": risk_level,
+            },
+            "thresholds": {
+                "margin_call_threshold": margin_call_threshold,
+                "liquidation_threshold": liquidation_threshold,
+                "margin_call_distance": margin_call_distance,
+                "liquidation_distance": liquidation_distance,
+            },
+            "interest": {
+                "as_of": interest.get("as_of", as_of_date.isoformat()),
+                "total_accrued": interest.get("total_accrued", 0.0),
+                "items": interest.get("items", []),
+            },
+            "alerts": self._build_margin_alerts(
+                maintenance_ratio=maintenance_ratio,
+                margin_call_threshold=margin_call_threshold,
+                liquidation_threshold=liquidation_threshold,
+                margin_summary=margin_summary,
+            ),
+        }
+
+    @staticmethod
+    def _build_margin_alerts(
+        *,
+        maintenance_ratio: Optional[float],
+        margin_call_threshold: float,
+        liquidation_threshold: float,
+        margin_summary: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """构建融资融券风险告警"""
+        alerts: List[Dict[str, Any]] = []
+
+        # 维持担保比例告警
+        if maintenance_ratio is not None:
+            if maintenance_ratio < liquidation_threshold:
+                alerts.append({
+                    "type": "liquidation_danger",
+                    "level": "danger",
+                    "message": f"维持担保比例({maintenance_ratio:.2f}%)低于平仓线({liquidation_threshold:.2f}%)，存在强制平仓风险",
+                    "value": maintenance_ratio,
+                    "threshold": liquidation_threshold,
+                })
+            elif maintenance_ratio < margin_call_threshold:
+                alerts.append({
+                    "type": "margin_call_warning",
+                    "level": "warning",
+                    "message": f"维持担保比例({maintenance_ratio:.2f}%)低于追保线({margin_call_threshold:.2f}%)，需关注担保品价值",
+                    "value": maintenance_ratio,
+                    "threshold": margin_call_threshold,
+                })
+
+        # 融资融券规模告警（可选）
+        total_margin = margin_summary.get("total_margin_principal", 0.0)
+        total_securities = margin_summary.get("total_securities_principal", 0.0)
+        if total_margin > 0 or total_securities > 0:
+            total_interest = margin_summary.get("total_interest_accrued", 0.0)
+            if total_interest > 1000:  # 利息超过1000元提醒
+                alerts.append({
+                    "type": "interest_accrual",
+                    "level": "info",
+                    "message": f"累计应付利息已达 {total_interest:.2f} 元，建议关注利息成本",
+                    "value": total_interest,
+                    "threshold": 1000,
+                })
+
+        return alerts

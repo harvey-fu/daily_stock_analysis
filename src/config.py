@@ -596,6 +596,8 @@ class Config:
 
     # === 数据源 API Token ===
     tushare_token: Optional[str] = None
+    # [新增] 支持自定义 Tushare API 代理地址，使用中转服务时填写，留空则用官方 api.tushare.pro | 2026-05-04
+    tushare_api_url: Optional[str] = None
     tickflow_api_key: Optional[str] = None
     longbridge_app_key: Optional[str] = None
     longbridge_app_secret: Optional[str] = None
@@ -713,7 +715,7 @@ class Config:
     
     # 邮件配置（只需邮箱和授权码，SMTP 自动识别）
     email_sender: Optional[str] = None  # 发件人邮箱
-    email_sender_name: str = "daily_stock_analysis股票分析助手"  # 发件人显示名称
+    email_sender_name: str = "AI股票分析助手——捡贝壳的FBB"  # 发件人显示名称
     email_password: Optional[str] = None  # 邮箱密码/授权码
     email_receivers: List[str] = field(default_factory=list)  # 收件人列表（留空则发给自己）
 
@@ -820,7 +822,7 @@ class Config:
     
     # === 定时任务配置 ===
     schedule_enabled: bool = False            # 是否启用定时任务
-    schedule_time: str = "18:00"              # 每日推送时间（HH:MM 格式）
+    schedule_time: str = "20:00"              # 每日推送时间（HH:MM 格式）
     schedule_run_immediately: bool = True     # 启动时是否立即执行一次
     run_immediately: bool = True              # 启动时是否立即执行一次（非定时模式）
     market_review_enabled: bool = True        # 是否启用大盘复盘
@@ -1315,6 +1317,8 @@ class Config:
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),
             tushare_token=os.getenv('TUSHARE_TOKEN'),
+            # [新增] 读取 TUSHARE_API_URL 环境变量，支持 Tushare 中转代理 | 2026-05-04
+            tushare_api_url=os.getenv('TUSHARE_API_URL'),
             tickflow_api_key=os.getenv('TICKFLOW_API_KEY'),
             longbridge_app_key=os.getenv('LONGBRIDGE_APP_KEY') or None,
             longbridge_app_secret=os.getenv('LONGBRIDGE_APP_SECRET') or None,

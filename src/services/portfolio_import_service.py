@@ -75,6 +75,55 @@ DEFAULT_PARSER_SPECS: Tuple[CsvParserSpec, ...] = (
     ),
 )
 
+# 2026-05-06: 融资融券 CSV 解析器规范
+MARGIN_PARSER_SPECS: Tuple[CsvParserSpec, ...] = (
+    CsvParserSpec(
+        broker="huatai_margin",
+        aliases=(),
+        display_name="华泰融资融券",
+        column_hints={
+            "trade_date": ("成交日期", "交易日期", "日期"),
+            "symbol": ("证券代码", "股票代码", "代码"),
+            "side": ("交易类型", "业务类型", "操作类型"),
+            "quantity": ("成交数量", "数量", "成交股数"),
+            "price": ("成交价格", "成交价", "价格"),
+            "interest_rate": ("利率", "年利率", "融资利率", "融券利率"),
+            "fee": ("手续费", "佣金", "交易费"),
+            "interest": ("利息", "融资利息", "融券利息"),
+        },
+    ),
+    CsvParserSpec(
+        broker="citic_margin",
+        aliases=("zhongxin_margin",),
+        display_name="中信融资融券",
+        column_hints={
+            "trade_date": ("发生日期", "成交日期", "日期"),
+            "symbol": ("证券代码", "股票代码", "代码"),
+            "side": ("业务名称", "交易类型", "操作类型"),
+            "quantity": ("成交数量", "数量"),
+            "price": ("成交价格", "成交价"),
+            "interest_rate": ("利率", "年利率"),
+            "fee": ("手续费", "佣金"),
+            "interest": ("利息",),
+        },
+    ),
+    CsvParserSpec(
+        broker="cmb_margin",
+        aliases=("zhaoshang_margin", "cmbchina_margin"),
+        display_name="招商融资融券",
+        column_hints={
+            "trade_date": ("日期", "成交日期"),
+            "symbol": ("证券代码", "股票代码"),
+            "side": ("交易类型", "业务类型"),
+            "quantity": ("成交数量", "成交股数"),
+            "price": ("成交价格", "成交价"),
+            "interest_rate": ("利率",),
+            "fee": ("手续费",),
+            "interest": ("利息",),
+        },
+    ),
+)
+
 
 class PortfolioImportService:
     """Parse broker CSV and commit normalized trade records with dedup."""
@@ -94,6 +143,7 @@ class PortfolioImportService:
         self._broker_alias_map = self.__class__._shared_broker_alias_map
         if not self.__class__._shared_registry_initialized:
             self._init_default_parsers()
+            self._init_margin_parsers()  # 2026-05-06: 初始化融资融券解析器
             self.__class__._shared_registry_initialized = True
 
     def _init_default_parsers(self) -> None:
@@ -442,6 +492,251 @@ class PortfolioImportService:
                 f"{float(record.get('fee', 0.0)):.8f}",
                 f"{float(record.get('tax', 0.0)):.8f}",
                 str(record.get("currency") or ""),
+                str(record.get("_source_line_number") or record.get("source_line_number") or ""),
+            ]
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    # ===================================
+    # 2026-05-06: 融资融券 CSV 导入
+    # ===================================
+
+    def _init_margin_parsers(self) -> None:
+        """初始化融资融券 CSV 解析器"""
+        for spec in MARGIN_PARSER_SPECS:
+            self.register_parser(spec)
+
+    def parse_margin_csv(
+        self,
+        *,
+        broker: str,
+        content: bytes,
+    ) -> Dict[str, Any]:
+        """解析融资融券 CSV 文件"""
+        broker_norm = self._normalize_broker(broker)
+        parser_spec = self._parser_registry[broker_norm]
+        df = self._read_csv(content)
+
+        records: List[Dict[str, Any]] = []
+        skipped = 0
+        errors: List[str] = []
+
+        for idx, row in df.iterrows():
+            normalized = self._normalize_margin_row(row=row, parser_spec=parser_spec)
+            if normalized is None:
+                skipped += 1
+                continue
+            try:
+                normalized["_source_line_number"] = int(idx) + 2
+                normalized["dedup_hash"] = self._build_margin_dedup_hash(normalized)
+                records.append(normalized)
+            except Exception as exc:
+                skipped += 1
+                errors.append(f"row={idx + 1}: {exc}")
+
+        return {
+            "broker": broker_norm,
+            "record_count": len(records),
+            "skipped_count": skipped,
+            "error_count": len(errors),
+            "records": records,
+            "errors": errors[:20],
+        }
+
+    def commit_margin_records(
+        self,
+        *,
+        account_id: int,
+        broker: str,
+        records: List[Dict[str, Any]],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """提交融资融券交易记录"""
+        broker_norm = self._normalize_broker(broker)
+
+        inserted_count = 0
+        duplicate_count = 0
+        failed_count = 0
+        errors: List[str] = []
+        seen_dedup_hashes: set[str] = set()
+
+        for i, record in enumerate(records):
+            try:
+                dedup_hash = (record.get("dedup_hash") or "").strip()
+                if not dedup_hash:
+                    dedup_hash = self._build_margin_dedup_hash(record)
+
+                dedup_hash_to_use: Optional[str] = dedup_hash or None
+                if dedup_hash_to_use and self.repo.has_trade_dedup_hash(account_id, dedup_hash_to_use):
+                    duplicate_count += 1
+                    continue
+
+                if dry_run:
+                    if dedup_hash_to_use and dedup_hash_to_use in seen_dedup_hashes:
+                        duplicate_count += 1
+                        continue
+                    inserted_count += 1
+                    if dedup_hash_to_use:
+                        seen_dedup_hashes.add(dedup_hash_to_use)
+                    continue
+
+                trade_date_value = record.get("trade_date")
+                if isinstance(trade_date_value, date):
+                    trade_date_obj = trade_date_value
+                else:
+                    trade_date_obj = date.fromisoformat(str(trade_date_value))
+
+                self.portfolio_service.record_margin_trade(
+                    account_id=account_id,
+                    symbol=str(record["symbol"]),
+                    market=record.get("market", "cn"),
+                    side=str(record["side"]),
+                    quantity=float(record["quantity"]),
+                    price=float(record["price"]),
+                    interest_rate=float(record.get("interest_rate", 0.0) or 0.0),
+                    fee=float(record.get("fee", 0.0) or 0.0),
+                    tax=float(record.get("tax", 0.0) or 0.0),
+                    note=(record.get("note") or "").strip() or f"csv_import:{broker_norm}",
+                )
+                inserted_count += 1
+            except PortfolioConflictError:
+                duplicate_count += 1
+            except PortfolioOversellError as exc:
+                failed_count += 1
+                errors.append(f"idx={i}: {exc}")
+            except PortfolioBusyError as exc:
+                failed_count += 1
+                errors.append(f"idx={i}: portfolio_busy: {exc}")
+            except Exception as exc:
+                failed_count += 1
+                errors.append(f"idx={i}: {exc}")
+
+        return {
+            "account_id": account_id,
+            "record_count": len(records),
+            "inserted_count": inserted_count,
+            "duplicate_count": duplicate_count,
+            "failed_count": failed_count,
+            "dry_run": bool(dry_run),
+            "errors": errors[:20],
+        }
+
+    def _normalize_margin_row(
+        self,
+        *,
+        row: Any,
+        parser_spec: CsvParserSpec,
+    ) -> Optional[Dict[str, Any]]:
+        """标准化融资融券 CSV 行"""
+        broker_hints = parser_spec.column_hints
+
+        trade_date_raw = self._pick(
+            row,
+            *(broker_hints.get("trade_date") or ()),
+            "成交日期",
+            "交易日期",
+            "日期",
+        )
+        trade_date_obj = self._parse_date(trade_date_raw)
+        if trade_date_obj is None:
+            return None
+
+        symbol_raw = self._pick(
+            row,
+            *(broker_hints.get("symbol") or ()),
+            "证券代码",
+            "股票代码",
+            "代码",
+        )
+        symbol = canonical_stock_code(str(symbol_raw or "").strip())
+        if not symbol:
+            return None
+
+        side_raw = self._pick(
+            row,
+            *(broker_hints.get("side") or ()),
+            "交易类型",
+            "业务类型",
+            "操作类型",
+        )
+        side = self._normalize_margin_side(side_raw)
+        if side is None:
+            return None
+
+        quantity = self._parse_float(
+            self._pick(row, *(broker_hints.get("quantity") or ()), "成交数量", "数量")
+        )
+        price = self._parse_float(
+            self._pick(row, *(broker_hints.get("price") or ()), "成交价格", "成交价")
+        )
+        if quantity is None or quantity <= 0 or price is None or price <= 0:
+            return None
+
+        interest_rate = self._parse_float(
+            self._pick(row, *(broker_hints.get("interest_rate") or ()), "利率", "年利率")
+        )
+        if interest_rate is None:
+            interest_rate = 0.0
+
+        fee = 0.0
+        for col in ("手续费", "佣金", "交易费"):
+            value = self._parse_float(self._pick(row, col))
+            if value is not None:
+                fee += value
+
+        interest = 0.0
+        for col in ("利息", "融资利息", "融券利息"):
+            value = self._parse_float(self._pick(row, col))
+            if value is not None:
+                interest += value
+
+        return {
+            "trade_date": trade_date_obj,
+            "symbol": symbol,
+            "side": side,
+            "quantity": float(quantity),
+            "price": float(price),
+            "interest_rate": float(interest_rate),
+            "fee": float(fee),
+            "tax": 0.0,
+            "interest": float(interest),
+            "currency": None,
+        }
+
+    @staticmethod
+    def _normalize_margin_side(value: Any) -> Optional[str]:
+        """标准化融资融券交易类型"""
+        text = str(value or "").strip().lower()
+        if not text:
+            return None
+        compact = text.replace(" ", "")
+
+        margin_buy_exact = {"融资买入", "融资", "margin_buy", "marginbuy"}
+        short_sell_exact = {"融券卖出", "融券", "short_sell", "shortsell"}
+        margin_repay_exact = {"卖券还款", "还款", "margin_repay", "marginrepay"}
+        short_cover_exact = {"买券还券", "还券", "short_cover", "shortcover"}
+
+        if compact in margin_buy_exact or "融资买入" in compact:
+            return "margin_buy"
+        if compact in short_sell_exact or "融券卖出" in compact:
+            return "short_sell"
+        if compact in margin_repay_exact or "卖券还款" in compact:
+            return "margin_repay"
+        if compact in short_cover_exact or "买券还券" in compact:
+            return "short_cover"
+        return None
+
+    @staticmethod
+    def _build_margin_dedup_hash(record: Dict[str, Any]) -> str:
+        """构建融资融券交易去重哈希"""
+        payload = "|".join(
+            [
+                str(record.get("trade_date") or ""),
+                str(record.get("symbol") or ""),
+                str(record.get("side") or ""),
+                f"{float(record.get('quantity', 0.0)):.8f}",
+                f"{float(record.get('price', 0.0)):.8f}",
+                f"{float(record.get('interest_rate', 0.0)):.8f}",
                 str(record.get("_source_line_number") or record.get("source_line_number") or ""),
             ]
         )

@@ -21,6 +21,7 @@ from src.storage import (
     PortfolioCorporateAction,
     PortfolioDailySnapshot,
     PortfolioFxRate,
+    PortfolioMarginDetail,
     PortfolioPosition,
     PortfolioPositionLot,
     PortfolioTrade,
@@ -1087,3 +1088,231 @@ class PortfolioRepository:
                 existing.updated_at = datetime.now()
 
             session.commit()
+
+    # ------------------------------------------------------------------
+    # 融资融券 Margin & Securities Lending
+    # ------------------------------------------------------------------
+
+    def create_account_with_type(
+        self,
+        *,
+        name: str,
+        broker: Optional[str],
+        market: str,
+        base_currency: str,
+        account_type: str = 'cash',
+        margin_interest_rate: Optional[float] = None,
+        securities_interest_rate: Optional[float] = None,
+        margin_ratio: Optional[float] = None,
+        owner_id: Optional[str] = None,
+    ) -> PortfolioAccount:
+        """创建账户，支持普通账户和融资融券账户"""
+        with self.db.get_session() as session:
+            row = PortfolioAccount(
+                owner_id=owner_id,
+                name=name,
+                broker=broker,
+                market=market,
+                base_currency=base_currency,
+                account_type=account_type,
+                margin_interest_rate=margin_interest_rate,
+                securities_interest_rate=securities_interest_rate,
+                margin_ratio=margin_ratio,
+                is_active=True,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row
+
+    def insert_margin_detail(
+        self,
+        *,
+        account_id: int,
+        trade_id: Optional[int],
+        symbol: str,
+        market: str,
+        margin_type: str,
+        principal: float,
+        quantity: Optional[float],
+        interest_rate: float,
+        open_date: date,
+        note: Optional[str] = None,
+    ) -> PortfolioMarginDetail:
+        """插入融资融券明细"""
+        with self.db.get_session() as session:
+            row = PortfolioMarginDetail(
+                account_id=account_id,
+                trade_id=trade_id,
+                symbol=symbol,
+                market=market,
+                margin_type=margin_type,
+                principal=principal,
+                quantity=quantity,
+                interest_rate=interest_rate,
+                open_date=open_date,
+                is_open=True,
+                note=note,
+            )
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+            return row
+
+    def get_open_margin_details(
+        self,
+        account_id: int,
+        margin_type: Optional[str] = None,
+    ) -> List[PortfolioMarginDetail]:
+        """获取未平仓融资融券明细"""
+        with self.db.get_session() as session:
+            query = select(PortfolioMarginDetail).where(
+                and_(
+                    PortfolioMarginDetail.account_id == account_id,
+                    PortfolioMarginDetail.is_open.is_(True),
+                )
+            )
+            if margin_type:
+                query = query.where(PortfolioMarginDetail.margin_type == margin_type)
+            return list(session.execute(query.order_by(PortfolioMarginDetail.open_date.asc())).scalars().all())
+
+    def get_all_margin_details(
+        self,
+        account_id: int,
+        margin_type: Optional[str] = None,
+        is_open: Optional[bool] = None,
+    ) -> List[PortfolioMarginDetail]:
+        """获取所有融资融券明细"""
+        with self.db.get_session() as session:
+            query = select(PortfolioMarginDetail).where(
+                PortfolioMarginDetail.account_id == account_id
+            )
+            if margin_type:
+                query = query.where(PortfolioMarginDetail.margin_type == margin_type)
+            if is_open is not None:
+                query = query.where(PortfolioMarginDetail.is_open.is_(is_open))
+            return list(session.execute(query.order_by(PortfolioMarginDetail.open_date.desc())).scalars().all())
+
+    def update_margin_interest(
+        self,
+        detail_id: int,
+        accrued_interest: float,
+        total_interest_paid: Optional[float] = None,
+    ) -> bool:
+        """更新融资融券利息"""
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(PortfolioMarginDetail).where(PortfolioMarginDetail.id == detail_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            row.accrued_interest = accrued_interest
+            if total_interest_paid is not None:
+                row.total_interest_paid = total_interest_paid
+            row.updated_at = datetime.now()
+            session.commit()
+            return True
+
+    def close_margin_detail(
+        self,
+        detail_id: int,
+        close_date: date,
+    ) -> bool:
+        """平仓融资融券"""
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(PortfolioMarginDetail).where(PortfolioMarginDetail.id == detail_id)
+            ).scalar_one_or_none()
+            if row is None:
+                return False
+            row.is_open = False
+            row.close_date = close_date
+            row.updated_at = datetime.now()
+            session.commit()
+            return True
+
+    def get_margin_summary(
+        self,
+        account_id: int,
+    ) -> Dict[str, Any]:
+        """获取融资融券汇总"""
+        with self.db.get_session() as session:
+            # 融资汇总
+            margin_query = select(
+                func.sum(PortfolioMarginDetail.principal).label('total_principal'),
+                func.sum(PortfolioMarginDetail.accrued_interest).label('total_accrued'),
+                func.sum(PortfolioMarginDetail.total_interest_paid).label('total_paid'),
+                func.count().label('count'),
+            ).where(
+                and_(
+                    PortfolioMarginDetail.account_id == account_id,
+                    PortfolioMarginDetail.margin_type == 'margin',
+                    PortfolioMarginDetail.is_open.is_(True),
+                )
+            )
+            margin_result = session.execute(margin_query).one()
+
+            # 融券汇总
+            securities_query = select(
+                func.sum(PortfolioMarginDetail.principal).label('total_principal'),
+                func.sum(PortfolioMarginDetail.accrued_interest).label('total_accrued'),
+                func.sum(PortfolioMarginDetail.total_interest_paid).label('total_paid'),
+                func.count().label('count'),
+            ).where(
+                and_(
+                    PortfolioMarginDetail.account_id == account_id,
+                    PortfolioMarginDetail.margin_type == 'securities',
+                    PortfolioMarginDetail.is_open.is_(True),
+                )
+            )
+            securities_result = session.execute(securities_query).one()
+
+            return {
+                'margin': {
+                    'total_principal': float(margin_result.total_principal or 0),
+                    'total_accrued_interest': float(margin_result.total_accrued or 0),
+                    'total_interest_paid': float(margin_result.total_paid or 0),
+                    'count': int(margin_result.count or 0),
+                },
+                'securities': {
+                    'total_principal': float(securities_result.total_principal or 0),
+                    'total_accrued_interest': float(securities_result.total_accrued or 0),
+                    'total_interest_paid': float(securities_result.total_paid or 0),
+                    'count': int(securities_result.count or 0),
+                },
+            }
+
+    def calculate_margin_interest(
+        self,
+        account_id: int,
+        as_of_date: date,
+    ) -> List[Dict[str, Any]]:
+        """计算融资融券利息（按日计息）"""
+        details = self.get_open_margin_details(account_id)
+        results = []
+
+        for detail in details:
+            # 计算从开仓到 as_of_date 的天数
+            days = (as_of_date - detail.open_date).days
+            if days <= 0:
+                continue
+
+            # 按日计息：利息 = 本金 * 年利率 / 365 * 天数
+            daily_rate = detail.interest_rate / 365
+            total_interest = detail.principal * daily_rate * days
+            new_accrued = total_interest - detail.total_interest_paid
+
+            results.append({
+                'detail_id': detail.id,
+                'symbol': detail.symbol,
+                'margin_type': detail.margin_type,
+                'principal': detail.principal,
+                'interest_rate': detail.interest_rate,
+                'days': days,
+                'total_interest': round(total_interest, 2),
+                'accrued_interest': round(max(0, new_accrued), 2),
+                'total_interest_paid': detail.total_interest_paid,
+                'open_date': detail.open_date,
+            })
+
+        return results

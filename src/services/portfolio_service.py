@@ -36,6 +36,11 @@ VALID_CASH_DIRECTIONS = {"in", "out"}
 VALID_CORPORATE_ACTIONS = {"cash_dividend", "split_adjustment"}
 PORTFOLIO_FX_REFRESH_DISABLED_REASON = "portfolio_fx_update_disabled"
 
+# 2026-05-06: 融资融券相关常量
+VALID_ACCOUNT_TYPES = {"cash", "margin"}
+VALID_MARGIN_SIDES = {"margin_buy", "short_sell", "margin_repay", "short_cover"}
+VALID_MARGIN_TYPES = {"margin", "securities"}
+
 
 class PortfolioConflictError(Exception):
     """Raised when request conflicts with existing portfolio state."""
@@ -96,18 +101,36 @@ class PortfolioService:
         broker: Optional[str],
         market: str,
         base_currency: str,
+        account_type: str = 'cash',
+        margin_interest_rate: Optional[float] = None,
+        securities_interest_rate: Optional[float] = None,
+        margin_ratio: Optional[float] = None,
         owner_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """创建账户，支持普通账户和融资融券账户"""
         name_norm = (name or "").strip()
         if not name_norm:
             raise ValueError("name is required")
         market_norm = self._normalize_market(market)
         base_currency_norm = self._normalize_currency(base_currency)
-        row = self.repo.create_account(
+        account_type_norm = (account_type or 'cash').strip().lower()
+        if account_type_norm not in VALID_ACCOUNT_TYPES:
+            raise ValueError(f"account_type must be one of {VALID_ACCOUNT_TYPES}")
+
+        # 融资融券账户必须配置利率
+        if account_type_norm == 'margin':
+            if margin_interest_rate is None and securities_interest_rate is None:
+                raise ValueError("margin account requires at least one interest rate")
+
+        row = self.repo.create_account_with_type(
             name=name_norm,
             broker=(broker or "").strip() or None,
             market=market_norm,
             base_currency=base_currency_norm,
+            account_type=account_type_norm,
+            margin_interest_rate=margin_interest_rate,
+            securities_interest_rate=securities_interest_rate,
+            margin_ratio=margin_ratio,
             owner_id=(owner_id or "").strip() or None,
         )
         return self._account_to_dict(row)
@@ -1517,6 +1540,10 @@ class PortfolioService:
             "broker": row.broker,
             "market": row.market,
             "base_currency": row.base_currency,
+            "account_type": getattr(row, 'account_type', 'cash'),
+            "margin_interest_rate": getattr(row, 'margin_interest_rate', None),
+            "securities_interest_rate": getattr(row, 'securities_interest_rate', None),
+            "margin_ratio": getattr(row, 'margin_ratio', None),
             "is_active": bool(row.is_active),
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -1608,3 +1635,200 @@ class PortfolioService:
         if market == "us":
             return "USD"
         return "CNY"
+
+    # ------------------------------------------------------------------
+    # 融资融券 Margin & Securities Lending
+    # ------------------------------------------------------------------
+
+    def record_margin_trade(
+        self,
+        *,
+        account_id: int,
+        symbol: str,
+        market: str,
+        side: str,
+        quantity: float,
+        price: float,
+        interest_rate: float,
+        fee: float = 0.0,
+        tax: float = 0.0,
+        note: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """记录融资融券交易"""
+        # 验证账户类型
+        account = self.repo.get_account(account_id)
+        if account is None:
+            raise ValueError(f"Account {account_id} not found")
+        if account.account_type != 'margin':
+            raise ValueError("Only margin accounts support margin trades")
+
+        # 验证交易类型
+        side_norm = (side or "").strip().lower()
+        if side_norm not in VALID_MARGIN_SIDES:
+            raise ValueError(f"side must be one of {VALID_MARGIN_SIDES}")
+
+        # 验证数量和价格
+        if quantity <= 0 or price <= 0:
+            raise ValueError("quantity and price must be > 0")
+        if fee < 0 or tax < 0:
+            raise ValueError("fee and tax must be >= 0")
+        if interest_rate < 0:
+            raise ValueError("interest_rate must be >= 0")
+
+        # 规范化股票代码
+        symbol_norm = self._normalize_symbol_for_storage(symbol)
+        if not symbol_norm:
+            raise ValueError("symbol is required")
+
+        market_norm = self._normalize_market(market)
+
+        # 确定融资融券类型
+        margin_type = 'margin' if side_norm in ('margin_buy', 'margin_repay') else 'securities'
+
+        # 计算本金
+        principal = quantity * price
+
+        # 记录交易
+        trade = self.repo.record_trade(
+            account_id=account_id,
+            symbol=symbol_norm,
+            trade_date=date.today(),
+            side=side_norm,
+            quantity=quantity,
+            price=price,
+            fee=fee,
+            tax=tax,
+            market=market_norm,
+            currency=self._default_currency_for_market(market_norm),
+            note=note,
+        )
+
+        # 记录融资融券明细
+        margin_detail = self.repo.insert_margin_detail(
+            account_id=account_id,
+            trade_id=trade['id'],
+            symbol=symbol_norm,
+            market=market_norm,
+            margin_type=margin_type,
+            principal=principal,
+            quantity=quantity if margin_type == 'securities' else None,
+            interest_rate=interest_rate,
+            open_date=date.today(),
+            note=note,
+        )
+
+        return {
+            'trade': trade,
+            'margin_detail': self._margin_detail_to_dict(margin_detail),
+        }
+
+    def get_margin_details(
+        self,
+        account_id: int,
+        margin_type: Optional[str] = None,
+        is_open: Optional[bool] = None,
+    ) -> List[Dict[str, Any]]:
+        """获取融资融券明细"""
+        details = self.repo.get_all_margin_details(
+            account_id=account_id,
+            margin_type=margin_type,
+            is_open=is_open,
+        )
+        return [self._margin_detail_to_dict(d) for d in details]
+
+    def get_margin_summary(self, account_id: int) -> Dict[str, Any]:
+        """获取融资融券汇总"""
+        return self.repo.get_margin_summary(account_id)
+
+    def calculate_margin_interest(
+        self,
+        account_id: int,
+        as_of_date: Optional[date] = None,
+    ) -> List[Dict[str, Any]]:
+        """计算融资融券利息"""
+        if as_of_date is None:
+            as_of_date = date.today()
+        return self.repo.calculate_margin_interest(account_id, as_of_date)
+
+    def get_maintenance_ratio(self, account_id: int) -> Dict[str, Any]:
+        """计算维持担保比例"""
+        # 获取账户信息
+        account = self.repo.get_account(account_id)
+        if account is None:
+            raise ValueError(f"Account {account_id} not found")
+
+        # 获取融资融券汇总
+        summary = self.repo.get_margin_summary(account_id)
+
+        # 获取持仓市值
+        positions = self.repo.get_positions(account_id)
+        total_market_value = sum(p.get('market_value_base', 0) for p in positions)
+
+        # 计算总负债
+        total_liability = (
+            summary['margin']['total_principal'] +
+            summary['securities']['total_principal']
+        )
+
+        # 计算维持担保比例
+        if total_liability > 0:
+            maintenance_ratio = total_market_value / total_liability
+        else:
+            maintenance_ratio = float('inf')  # 无负债
+
+        # 追保线和平仓线（默认值）
+        margin_call_threshold = 1.5  # 追保线 150%
+        liquidation_threshold = 1.3  # 平仓线 130%
+
+        return {
+            'total_market_value': round(total_market_value, 2),
+            'total_liability': round(total_liability, 2),
+            'maintenance_ratio': round(maintenance_ratio, 4) if maintenance_ratio != float('inf') else None,
+            'margin_call_threshold': margin_call_threshold,
+            'liquidation_threshold': liquidation_threshold,
+            'margin_call_distance': (
+                round(maintenance_ratio - margin_call_threshold, 4)
+                if maintenance_ratio != float('inf') else None
+            ),
+            'liquidation_distance': (
+                round(maintenance_ratio - liquidation_threshold, 4)
+                if maintenance_ratio != float('inf') else None
+            ),
+            'is_margin_call': maintenance_ratio <= margin_call_threshold if maintenance_ratio != float('inf') else False,
+            'is_liquidation': maintenance_ratio <= liquidation_threshold if maintenance_ratio != float('inf') else False,
+        }
+
+    def close_margin_detail(
+        self,
+        detail_id: int,
+        close_date: Optional[date] = None,
+    ) -> bool:
+        """平仓融资融券"""
+        if close_date is None:
+            close_date = date.today()
+        return self.repo.close_margin_detail(detail_id, close_date)
+
+    @staticmethod
+    def _margin_detail_to_dict(row: Any) -> Dict[str, Any]:
+        """将融资融券明细转换为字典"""
+        return {
+            "id": int(row.id),
+            "account_id": int(row.account_id),
+            "trade_id": int(row.trade_id) if row.trade_id else None,
+            "symbol": row.symbol,
+            "market": row.market,
+            "margin_type": row.margin_type,
+            "principal": float(row.principal),
+            "quantity": float(row.quantity) if row.quantity is not None else None,
+            "interest_rate": float(row.interest_rate),
+            "accrued_interest": float(row.accrued_interest),
+            "total_interest_paid": float(row.total_interest_paid),
+            "open_date": row.open_date.isoformat() if row.open_date else "",
+            "close_date": row.close_date.isoformat() if row.close_date else None,
+            "is_open": bool(row.is_open),
+            "collateral_value": float(row.collateral_value) if row.collateral_value is not None else None,
+            "maintenance_ratio": float(row.maintenance_ratio) if row.maintenance_ratio is not None else None,
+            "note": row.note,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }

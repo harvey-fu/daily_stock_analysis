@@ -178,8 +178,13 @@ class TushareFetcher(BaseFetcher):
         The project already normalizes all Pro calls through the same request
         contract, so we do not need the official tushare SDK during runtime.
         """
-        client = _TushareHttpClient(token=token)
-        logger.debug("Tushare API client configured for direct HTTP calls")
+        # client = _TushareHttpClient(token=token)  # 原始代码：使用官方默认地址
+        # logger.debug("Tushare API client configured for direct HTTP calls")
+        # [修改] 支持通过 TUSHARE_API_URL 环境变量自定义 Tushare API 代理地址 | 2026-05-04
+        config = get_config()
+        api_url = getattr(config, 'tushare_api_url', None) or "http://api.tushare.pro"
+        client = _TushareHttpClient(token=token, api_url=api_url)
+        logger.debug(f"Tushare API client configured for direct HTTP calls (url={api_url})")
         return client
 
     def _determine_priority(self) -> int:
@@ -197,7 +202,8 @@ class TushareFetcher(BaseFetcher):
 
         if config.tushare_token and self._api is not None:
             # Token 配置且 API 初始化成功，提升为最高优先级
-            logger.info("✅ 检测到 TUSHARE_TOKEN 且 API 初始化成功，Tushare 数据源优先级提升为最高 (Priority -1)")
+            # [修复] 移除 emoji 避免 Windows GBK 编码错误 | 2026-05-06
+            logger.info("检测到 TUSHARE_TOKEN 且 API 初始化成功，Tushare 数据源优先级提升为最高 (Priority -1)")
             return -1
 
         # Token 未配置或 API 初始化失败，保持默认优先级

@@ -38,16 +38,16 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
 
   return (
     <div className="flex h-full flex-col">
-      <div className={cn('mb-4 flex items-center gap-2 px-1', collapsed ? 'justify-center' : '')}>
+      <div className={cn('mb-4 flex items-center gap-2 px-2', collapsed ? 'justify-center' : '')}>
         <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary-gradient text-[hsl(var(--primary-foreground))] shadow-[0_12px_28px_var(--nav-brand-shadow)]">
           <BarChart3 className="h-5 w-5" />
         </div>
         {!collapsed ? (
-          <p className="min-w-0 truncate text-sm font-semibold text-foreground">DSA</p>
+          <p className="min-w-0 truncate text-sm font-semibold text-foreground">DSA-捡贝壳的FBB</p>
         ) : null}
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1.5" aria-label="主导航">
+      <nav className="flex w-full flex-1 flex-col gap-1.5" aria-label="主导航">
         {NAV_ITEMS.map(({ key, label, to, icon: Icon, exact, badge }) => (
           <NavLink
             key={key}
@@ -57,9 +57,9 @@ export const SidebarNav: React.FC<SidebarNavProps> = ({ collapsed = false, onNav
             aria-label={label}
             className={({ isActive }) =>
               cn(
-                'group relative flex items-center gap-3 border-y border-x-0 text-sm transition-all',
+                'group relative flex w-full items-center gap-3 border-y border-x-0 text-sm transition-all',
                 'h-[var(--nav-item-height)]',
-                collapsed ? 'justify-center px-0' : 'px-[var(--nav-item-padding-x)]',
+                collapsed ? 'justify-center px-0' : 'px-3',
                 isActive
                   ? 'border-[var(--nav-active-border)] bg-[var(--nav-active-bg)] text-[hsl(var(--primary))] font-medium'
                   : 'border-transparent text-secondary-text hover:bg-[var(--nav-hover-bg)] hover:text-foreground'

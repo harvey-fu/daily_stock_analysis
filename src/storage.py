@@ -407,6 +407,12 @@ class PortfolioAccount(Base):
     broker = Column(String(64))
     market = Column(String(8), nullable=False, default='cn', index=True)  # cn/hk/us
     base_currency = Column(String(8), nullable=False, default='CNY')
+    # 2026-05-06: 新增账户类型支持融资融券
+    account_type = Column(String(16), nullable=False, default='cash', index=True)  # cash/margin
+    # 2026-05-06: 融资融券利率配置
+    margin_interest_rate = Column(Float, nullable=True)  # 融资年利率 (如 0.068 表示 6.8%)
+    securities_interest_rate = Column(Float, nullable=True)  # 融券年利率
+    margin_ratio = Column(Float, nullable=True)  # 保证金比例 (如 1.0 表示 100%)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
     created_at = Column(DateTime, default=datetime.now, index=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
@@ -460,6 +466,49 @@ class PortfolioCashLedger(Base):
 
     __table_args__ = (
         Index('ix_portfolio_cash_account_date', 'account_id', 'event_date'),
+    )
+
+
+class PortfolioMarginDetail(Base):
+    """融资融券明细表 - 记录每笔融资/融券的详细信息和利息"""
+
+    __tablename__ = 'portfolio_margin_details'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(Integer, ForeignKey('portfolio_accounts.id'), nullable=False, index=True)
+    trade_id = Column(Integer, ForeignKey('portfolio_trades.id'), nullable=True)  # 关联交易记录
+    symbol = Column(String(16), nullable=False, index=True)  # 证券代码
+    market = Column(String(8), nullable=False, default='cn')  # 市场
+
+    # 融资融券类型
+    margin_type = Column(String(16), nullable=False, index=True)  # margin (融资) / securities (融券)
+
+    # 金额/数量
+    principal = Column(Float, nullable=False)  # 融资/融券本金
+    quantity = Column(Float, nullable=True)  # 融券数量
+
+    # 利息
+    interest_rate = Column(Float, nullable=False)  # 年利率 (如 0.068 表示 6.8%)
+    accrued_interest = Column(Float, nullable=False, default=0.0)  # 已计未付利息
+    total_interest_paid = Column(Float, nullable=False, default=0.0)  # 已付利息总额
+
+    # 日期
+    open_date = Column(Date, nullable=False, index=True)  # 开仓日期
+    close_date = Column(Date, nullable=True)  # 平仓日期
+    is_open = Column(Boolean, nullable=False, default=True, index=True)  # 是否未平仓
+
+    # 担保品
+    collateral_value = Column(Float, nullable=True)  # 担保品价值
+    maintenance_ratio = Column(Float, nullable=True)  # 维持担保比例
+
+    note = Column(String(255))
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    __table_args__ = (
+        Index('ix_portfolio_margin_account_open', 'account_id', 'is_open'),
+        Index('ix_portfolio_margin_account_symbol', 'account_id', 'symbol'),
+        Index('ix_portfolio_margin_account_type', 'account_id', 'margin_type'),
     )
 
 

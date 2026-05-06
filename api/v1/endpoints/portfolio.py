@@ -11,6 +11,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 
 from api.v1.schemas.common import ErrorResponse
 from api.v1.schemas.portfolio import (
+    MarginCloseRequest,
+    MarginDetailItem,
+    MarginDetailListResponse,
+    MarginInterestResponse,
+    MarginSummary,
+    MarginTradeCreateRequest,
+    MaintenanceRatioResponse,
     PortfolioAccountCreateRequest,
     PortfolioAccountItem,
     PortfolioAccountListResponse,
@@ -91,6 +98,10 @@ def create_account(request: PortfolioAccountCreateRequest) -> PortfolioAccountIt
             broker=request.broker,
             market=request.market,
             base_currency=request.base_currency,
+            account_type=request.account_type,
+            margin_interest_rate=request.margin_interest_rate,
+            securities_interest_rate=request.securities_interest_rate,
+            margin_ratio=request.margin_ratio,
             owner_id=request.owner_id,
         )
         return PortfolioAccountItem(**row)
@@ -565,3 +576,171 @@ def get_risk_report(
         raise _bad_request(exc)
     except Exception as exc:
         raise _internal_error("Get risk report failed", exc)
+
+
+@router.get(
+    "/margin/risk",
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get margin risk report (融资融券风险报告)",
+)
+def get_margin_risk_report(
+    account_id: int = Query(..., description="Margin account id"),
+    as_of: Optional[date] = Query(None, description="Risk report date, default today"),
+):
+    service = PortfolioRiskService()
+    try:
+        data = service.get_margin_risk_report(account_id=account_id, as_of=as_of)
+        return data
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get margin risk report failed", exc)
+
+
+# ------------------------------------------------------------------
+# 融资融券 Margin & Securities Lending
+# ------------------------------------------------------------------
+
+@router.post(
+    "/margin/trades",
+    response_model=PortfolioEventCreatedResponse,
+    responses={400: {"model": ErrorResponse}, 409: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Record margin trade (融资买入/融券卖出/卖券还款/买券还券)",
+)
+def record_margin_trade(request: MarginTradeCreateRequest) -> PortfolioEventCreatedResponse:
+    service = PortfolioService()
+    try:
+        result = service.record_margin_trade(
+            account_id=request.account_id,
+            symbol=request.symbol,
+            market=request.market,
+            side=request.side,
+            quantity=request.quantity,
+            price=request.price,
+            interest_rate=request.interest_rate,
+            fee=request.fee,
+            tax=request.tax,
+            note=request.note,
+        )
+        return PortfolioEventCreatedResponse(**result['trade'])
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except PortfolioBusyError as exc:
+        raise _conflict_error(error="portfolio_busy", message=str(exc))
+    except Exception as exc:
+        raise _internal_error("Record margin trade failed", exc)
+
+
+@router.get(
+    "/margin/details",
+    response_model=MarginDetailListResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get margin details (融资融券明细)",
+)
+def get_margin_details(
+    account_id: int = Query(..., description="Account id"),
+    margin_type: Optional[str] = Query(None, description="Filter by type: margin/securities"),
+    is_open: Optional[bool] = Query(None, description="Filter by open status"),
+) -> MarginDetailListResponse:
+    service = PortfolioService()
+    try:
+        details = service.get_margin_details(
+            account_id=account_id,
+            margin_type=margin_type,
+            is_open=is_open,
+        )
+        items = [MarginDetailItem(**d) for d in details]
+        return MarginDetailListResponse(items=items, total=len(items))
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get margin details failed", exc)
+
+
+@router.get(
+    "/margin/summary",
+    response_model=MarginSummary,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get margin summary (融资融券汇总)",
+)
+def get_margin_summary(
+    account_id: int = Query(..., description="Account id"),
+) -> MarginSummary:
+    service = PortfolioService()
+    try:
+        summary = service.get_margin_summary(account_id)
+        return MarginSummary(**summary)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get margin summary failed", exc)
+
+
+@router.get(
+    "/margin/interest",
+    response_model=MarginInterestResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Calculate margin interest (融资融券利息计算)",
+)
+def calculate_margin_interest(
+    account_id: int = Query(..., description="Account id"),
+    as_of: Optional[date] = Query(None, description="Calculate interest as of date, default today"),
+) -> MarginInterestResponse:
+    service = PortfolioService()
+    try:
+        result = service.calculate_margin_interest(
+            account_id=account_id,
+            as_of_date=as_of,
+        )
+        return MarginInterestResponse(
+            as_of=result.get("as_of", str(as_of or date.today())),
+            items=result.get("items", []),
+            total_accrued=result.get("total_accrued", 0.0),
+        )
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Calculate margin interest failed", exc)
+
+
+@router.get(
+    "/margin/maintenance",
+    response_model=MaintenanceRatioResponse,
+    responses={400: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Get maintenance ratio (维持担保比例)",
+)
+def get_maintenance_ratio(
+    account_id: int = Query(..., description="Account id"),
+) -> MaintenanceRatioResponse:
+    service = PortfolioService()
+    try:
+        result = service.get_maintenance_ratio(account_id)
+        return MaintenanceRatioResponse(**result)
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Get maintenance ratio failed", exc)
+
+
+@router.post(
+    "/margin/{detail_id}/close",
+    responses={400: {"model": ErrorResponse}, 404: {"model": ErrorResponse}, 500: {"model": ErrorResponse}},
+    summary="Close margin detail (平仓融资融券)",
+)
+def close_margin_detail(
+    detail_id: int,
+    close_date: Optional[date] = Query(None, description="Close date, default today"),
+):
+    service = PortfolioService()
+    try:
+        ok = service.close_margin_detail(detail_id, close_date)
+        if not ok:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "not_found", "message": f"Margin detail not found: {detail_id}"},
+            )
+        return {"closed": 1}
+    except ValueError as exc:
+        raise _bad_request(exc)
+    except Exception as exc:
+        raise _internal_error("Close margin detail failed", exc)

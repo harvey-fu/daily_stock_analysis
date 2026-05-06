@@ -1,6 +1,12 @@
 import apiClient from './index';
 import { toCamelCase } from './utils';
 import type {
+  MarginCloseRequest,
+  MarginDetailListResponse,
+  MarginInterestResponse,
+  MarginSummary,
+  MarginTradeCreateRequest,
+  MaintenanceRatioResponse,
   PortfolioAccountItem,
   PortfolioAccountCreateRequest,
   PortfolioAccountListResponse,
@@ -114,6 +120,10 @@ export const portfolioApi = {
       market: payload.market,
       base_currency: payload.baseCurrency,
       owner_id: payload.ownerId,
+      account_type: payload.accountType ?? 'cash',
+      margin_interest_rate: payload.marginInterestRate,
+      securities_interest_rate: payload.securitiesInterestRate,
+      margin_ratio: payload.marginRatio,
     });
     return toCamelCase<PortfolioAccountItem>(response.data);
   },
@@ -262,5 +272,90 @@ export const portfolioApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     });
     return toCamelCase<PortfolioImportCommitResponse>(response.data);
+  },
+
+  // ===================================
+  // 2026-05-06: 融资融券相关 API
+  // ===================================
+
+  async recordMarginTrade(payload: MarginTradeCreateRequest): Promise<PortfolioEventCreatedResponse> {
+    const response = await apiClient.post<Record<string, unknown>>('/api/v1/portfolio/margin/trades', {
+      account_id: payload.accountId,
+      symbol: payload.symbol,
+      market: payload.market ?? 'cn',
+      side: payload.side,
+      quantity: payload.quantity,
+      price: payload.price,
+      interest_rate: payload.interestRate,
+      fee: payload.fee ?? 0,
+      tax: payload.tax ?? 0,
+      note: payload.note,
+    });
+    return toCamelCase<PortfolioEventCreatedResponse>(response.data);
+  },
+
+  async getMarginDetails(params: {
+    accountId: number;
+    marginType?: 'margin' | 'securities';
+    isOpen?: boolean;
+  }): Promise<MarginDetailListResponse> {
+    const queryParams: Record<string, string | number | boolean> = {
+      account_id: params.accountId,
+    };
+    if (params.marginType) {
+      queryParams.margin_type = params.marginType;
+    }
+    if (params.isOpen !== undefined) {
+      queryParams.is_open = params.isOpen;
+    }
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/margin/details', {
+      params: queryParams,
+    });
+    return toCamelCase<MarginDetailListResponse>(response.data);
+  },
+
+  async getMarginSummary(accountId: number): Promise<MarginSummary> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/margin/summary', {
+      params: { account_id: accountId },
+    });
+    return toCamelCase<MarginSummary>(response.data);
+  },
+
+  async calculateMarginInterest(params: {
+    accountId: number;
+    asOf?: string;
+  }): Promise<MarginInterestResponse> {
+    const queryParams: Record<string, string | number> = {
+      account_id: params.accountId,
+    };
+    if (params.asOf) {
+      queryParams.as_of = params.asOf;
+    }
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/margin/interest', {
+      params: queryParams,
+    });
+    return toCamelCase<MarginInterestResponse>(response.data);
+  },
+
+  async getMaintenanceRatio(accountId: number): Promise<MaintenanceRatioResponse> {
+    const response = await apiClient.get<Record<string, unknown>>('/api/v1/portfolio/margin/maintenance', {
+      params: { account_id: accountId },
+    });
+    return toCamelCase<MaintenanceRatioResponse>(response.data);
+  },
+
+  async closeMarginDetail(detailId: number, payload: MarginCloseRequest): Promise<{ closed: number }> {
+    const response = await apiClient.post<Record<string, unknown>>(
+      `/api/v1/portfolio/margin/${detailId}/close`,
+      undefined,
+      {
+        params: {
+          close_date: payload.closeDate,
+          repay_amount: payload.repayAmount,
+          repay_quantity: payload.repayQuantity,
+        },
+      },
+    );
+    return toCamelCase<{ closed: number }>(response.data);
   },
 };
