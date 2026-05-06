@@ -9,7 +9,7 @@
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Ready-2088FF?logo=github-actions&logoColor=white)](https://github.com/features/actions)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/zhulinsen/daily_stock_analysis)
 
-<p>
+<p align="center">
   <a href="https://trendshift.io/repositories/18527" target="_blank"><img src="https://trendshift.io/api/badge/repositories/18527" alt="ZhuLinsen%2Fdaily_stock_analysis | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
   <a href="https://hellogithub.com/repository/ZhuLinsen/daily_stock_analysis" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=6daa16e405ce46ed97b4a57706aeb29f&claim_uid=pfiJMqhR9uvDGlT&theme=neutral" alt="Featured｜HelloGitHub" style="width: 250px; height: 54px;" width="250" height="54" /></a>
 </p>
@@ -20,6 +20,8 @@ Analyze your watchlist daily -> generate a decision dashboard -> push to Telegra
 
 [**Key Features**](#-key-features) · [**Quick Start**](#-quick-start) · [**Sample Output**](#-sample-output) · [**Full Guide**](./full-guide_EN.md) · [**FAQ**](./FAQ_EN.md) · [**Changelog**](./CHANGELOG.md)
 
+> This PR-doc update is documentation-only and does not introduce runtime implementation changes. Provider recommendations for Anspire / AIHubMix / SerpAPI reflect existing runtime capabilities and configuration semantics.
+
 English | [简体中文](../README.md) | [繁體中文](README_CHT.md)
 
 </div>
@@ -27,11 +29,11 @@ English | [简体中文](../README.md) | [繁體中文](README_CHT.md)
 ## 💖 Sponsors
 
 <div align="center">
-  <a href="https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis" target="_blank">
-    <img src="../sources/serpapi_banner_en.png" alt="Easily scrape real-time financial news data from search engines - SerpApi" height="160">
-  </a>
+  <p align="center">
+    <a href="https://open.anspire.cn/?share_code=QFBC0FYC" target="_blank"><img src="../sources/anspire.png" alt="Anspire Open all-in-one model and search service" width="300" height="141" style="width: 300px; height: 141px; object-fit: contain;"></a>
+    <a href="https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis" target="_blank"><img src="../sources/serpapi_banner_en.png" alt="Easily scrape real-time financial news data from search engines - SerpApi" width="300" height="141" style="width: 300px; height: 141px; object-fit: contain;"></a>
+  </p>
 </div>
-<br>
 
 ## ✨ Key Features
 
@@ -56,9 +58,9 @@ English | [简体中文](../README.md) | [繁體中文](README_CHT.md)
 
 | Type | Supported |
 |------|-----------|
-| AI Models | [AIHubMix](https://aihubmix.com/?aff=CfMq), Gemini, OpenAI-compatible providers, DeepSeek, Qwen, Claude, Ollama |
+| AI Models | [Anspire](https://open.anspire.cn/?share_code=QFBC0FYC), [AIHubMix](https://aihubmix.com/?aff=CfMq), Gemini, OpenAI-compatible providers, DeepSeek, Qwen, Claude, Ollama |
 | Market Data | [TickFlow](https://tickflow.org/auth/register?ref=WDSGSPS5XC), AkShare, Tushare, Pytdx, Baostock, YFinance, Longbridge |
-| News Search | [Anspire](https://aisearch.anspire.cn/), [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis), [Tavily](https://tavily.com/), [Bocha](https://open.bocha.cn/), [Brave](https://brave.com/search/api/), [MiniMax](https://platform.minimaxi.com/), SearXNG |
+| News Search | [Anspire](https://open.anspire.cn/?share_code=QFBC0FYC), [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis), [Tavily](https://tavily.com/), [Bocha](https://open.bocha.cn/), [Brave](https://brave.com/search/api/), [MiniMax](https://platform.minimaxi.com/), SearXNG |
 | Social Sentiment | [Stock Sentiment API](https://api.adanos.org/docs) for Reddit / X / Polymarket, US stocks only |
 
 > Full behavior is documented in [Data Source Configuration](./full-guide_EN.md#data-source-configuration).
@@ -81,11 +83,10 @@ Open your forked repository, then go to `Settings` -> `Secrets and variables` ->
 
 Start with one provider and one API key. For multi-model routing, image recognition, local models, or advanced routing, see the [LLM Config Guide](./LLM_CONFIG_GUIDE_EN.md).
 
-> Recommended: [AIHubMix](https://aihubmix.com/?aff=CfMq). One key can access Gemini, GPT, Claude, DeepSeek, and other mainstream models without extra network setup. This project gets a 10% top-up discount.
-
 | Secret Name | Description | Required |
 |-------------|-------------|:--------:|
-| `AIHUBMIX_KEY` | AIHubMix API key, one key for multiple model families | Optional |
+| `ANSPIRE_API_KEYS` | [Anspire](https://open.anspire.cn/?share_code=QFBC0FYC) API key, one key for popular LLMs and web search with free quota for this project | **Recommended** |
+| `AIHUBMIX_KEY` | [AIHubMix](https://aihubmix.com/?aff=CfMq) API key, one key for multiple model families and a 10% top-up discount for this project | **Recommended** |
 | `GEMINI_API_KEY` | Google Gemini API key | Optional |
 | `ANTHROPIC_API_KEY` | Anthropic Claude API key | Optional |
 | `OPENAI_API_KEY` | OpenAI-compatible API key, including DeepSeek and Qwen-compatible services | Optional |
@@ -254,25 +255,6 @@ See supported features and release notes in the [Changelog](./CHANGELOG.md). Sug
 | :---: | :---: | :---: |
 | <img src="../sources/alipay.jpg" width="200" alt="Alipay"> | <img src="../sources/wechatpay.jpg" width="200" alt="WeChat Pay"> | <img src="../sources/xiaohongshu.png" width="200" alt="Xiaohongshu"> |
 
-## 🤝 Contributing
-
-Contributions are welcome. Before opening a PR, please run the checks that match your changes:
-
-```bash
-# Python / backend
-./scripts/ci_gate.sh
-
-# Web
-cd apps/dsa-web
-npm ci
-npm run lint
-npm run build
-```
-
-See [CONTRIBUTING_EN.md](CONTRIBUTING_EN.md) for details.
-
----
-
 ## 📄 License
 
 [MIT License](../LICENSE) © 2026 ZhuLinsen
@@ -283,7 +265,7 @@ If you use or build on this project, attribution with a link back to this reposi
 
 - GitHub Issues: [Report bugs or request features](https://github.com/ZhuLinsen/daily_stock_analysis/issues)
 - Discussions: [Join discussions](https://github.com/ZhuLinsen/daily_stock_analysis/discussions)
-- Email: zhuls345@gmail.com
+- Email: zhuls345@gmail.com (sponsorship, custom development, private deployment, and integration work)
 
 ## ⭐ Star History
 

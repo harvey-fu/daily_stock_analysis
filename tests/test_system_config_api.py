@@ -310,6 +310,7 @@ class SystemConfigApiTestCase(unittest.TestCase):
                     base_url="https://api.example.com/v1",
                     api_key="sk-test",
                     models=["gpt-4o-mini"],
+                    capability_checks=["json", "stream"],
                 ),
                 service=self.service,
             ).model_dump()
@@ -317,7 +318,9 @@ class SystemConfigApiTestCase(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["resolved_model"], "openai/gpt-4o-mini")
         self.assertEqual(payload["stage"], "chat_completion")
+        self.assertEqual(payload["capability_results"], {})
         mock_test.assert_called_once()
+        self.assertEqual(mock_test.call_args.kwargs["capability_checks"], ["json", "stream"])
 
     def test_validate_returns_user_facing_model_message_without_internal_env_key_name(self) -> None:
         validation = self.service.validate(

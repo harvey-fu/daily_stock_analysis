@@ -53,18 +53,25 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
   <img src="../sources/secret_config.png" alt="GitHub Secrets Configuration" width="600">
 </div>
 
-#### AI Model Configuration (Choose One)
+#### AI Model Configuration (Configure at Least One)
+
+> Note: The configuration below documents existing runtime provider support and compatibility boundaries; this update is documentation-alignment only and does not introduce new runtime implementation.
 
 | Secret Name | Description | Required |
 |------------|------|:----:|
-| `GEMINI_API_KEY` | Get free key from [Google AI Studio](https://aistudio.google.com/) | ✅* |
+| `ANSPIRE_API_KEYS` | [Anspire](https://open.anspire.cn/?share_code=QFBC0FYC) API key, one key for popular LLMs and Chinese-optimized web search with free quota for this project | Recommended |
+| `AIHUBMIX_KEY` | [AIHubMix](https://aihubmix.com/?aff=CfMq) API key, one key for multiple model families and a 10% top-up discount for this project | Recommended |
+| `GEMINI_API_KEY` | Get free key from [Google AI Studio](https://aistudio.google.com/) | Optional |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API Key | Optional |
 | `OPENAI_API_KEY` | OpenAI-compatible API Key (supports DeepSeek, Qwen, etc.) | Optional |
 | `OPENAI_BASE_URL` | OpenAI-compatible API endpoint (e.g., `https://api.deepseek.com`) | Optional |
 | `OPENAI_MODEL` | Model name (e.g., `deepseek-v4-flash`) | Optional |
 
-> *Note: Configure at least one of `GEMINI_API_KEY` or `OPENAI_API_KEY`
+> *Note: Configure at least one model key or channel. Anspire or AIHubMix is the simplest starting point for one-key multi-model access.
 
 #### Notification Channels (Multiple can be configured, all will receive notifications)
+
+> The P0 notification baseline, minimal/advanced key split, Actions mapping, and `--check-notify` CLI behavior are tracked in [Notification Baseline](notifications.md). A complete English notification topic remains a later follow-up.
 
 | Secret Name | Description | Required |
 |------------|------|:----:|
@@ -89,6 +96,8 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 | `STOCK_GROUP_N` / `EMAIL_GROUP_N` | Email routing groups (Issue #268): `STOCK_GROUP_N` should be a subset of `STOCK_LIST`; affects email recipients only, not analysis scope or other channels | Optional |
 | `PUSHPLUS_TOKEN` | PushPlus Token ([Get here](https://www.pushplus.plus), Chinese push service) | Optional |
 | `SERVERCHAN3_SENDKEY` | ServerChan v3 Sendkey ([Get here](https://sc3.ft07.com/), mobile app push service) | Optional |
+| `ASTRBOT_URL` | AstrBot Webhook URL | Optional |
+| `ASTRBOT_TOKEN` | Optional AstrBot Bearer Token | Optional |
 | `CUSTOM_WEBHOOK_URLS` | Custom Webhook (supports DingTalk, etc., comma-separated) | Optional |
 | `CUSTOM_WEBHOOK_BEARER_TOKEN` | Bearer Token for custom webhooks (for authenticated webhooks) | Optional |
 | `CUSTOM_WEBHOOK_BODY_TEMPLATE` | Custom Webhook JSON body template for AstrBot, NapCat, or self-hosted services with special payloads | Optional |
@@ -96,7 +105,7 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 
 > *Note: Configure at least one channel; multiple channels will all receive notifications
 >
-> The default `daily_analysis.yml` in this repository only exports fixed Secret / Variable names. Arbitrary numbered env vars such as `STOCK_GROUP_1` and `EMAIL_GROUP_1` are not auto-injected into the job, so grouped email routing is not available in the stock workflow unless you explicitly extend the workflow's `env:` mapping in your own fork.
+> The default `daily_analysis.yml` in this repository only exports fixed Secret / Variable names. Arbitrary numbered env vars such as `STOCK_GROUP_1` and `EMAIL_GROUP_1` are not auto-injected into the job, so grouped email routing is not available in the stock workflow unless you explicitly extend the workflow's `env:` mapping in your own fork. P0 maps `CUSTOM_WEBHOOK_BODY_TEMPLATE`, `WEBHOOK_VERIFY_SSL`, `FEISHU_WEBHOOK_SECRET`, `FEISHU_WEBHOOK_KEYWORD`, and `PUSHPLUS_TOPIC`; `MARKDOWN_TO_IMAGE_CHANNELS` and `MERGE_EMAIL_NOTIFICATION` remain behavior toggles for a later phase.
 
 #### Push Behavior Configuration
 
@@ -117,11 +126,12 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 | Secret Name | Description | Required |
 |------------|------|:----:|
 | `STOCK_LIST` | Watchlist codes, e.g., `600519,300750,002594` | ✅ |
-| `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) Search API (for news search) | Recommended |
-| `ANSPIRE_API_KEYS` | [Anspire AI Search](https://aisearch.anspire.cn/) optimized for Chinese content; the same key can also be used for Anspire LLM fallback scenarios (example model: `Doubao-Seed-2.0-lite`) | Optional |
-| `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimax.io/) Coding Plan Web Search (structured search results) | Optional |
+| `ANSPIRE_API_KEYS` | [Anspire AI Search](https://aisearch.anspire.cn/) optimized for Chinese content; the same key can also be used for Anspire LLM fallback scenarios (example model: `Doubao-Seed-2.0-lite`) | Recommended |
+| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis) search-engine results for realtime financial news | Recommended |
+| `TAVILY_API_KEYS` | [Tavily](https://tavily.com/) Search API (for news search) | Optional |
 | `BOCHA_API_KEYS` | [Bocha Search](https://open.bocha.cn/) Web Search API (Chinese search optimized, supports AI summaries, multiple keys comma-separated) | Optional |
-| `SERPAPI_API_KEYS` | [SerpAPI](https://serpapi.com/baidu-search-api?utm_source=github_daily_stock_analysis) Backup search | Optional |
+| `BRAVE_API_KEYS` | [Brave Search](https://brave.com/search/api/) API (privacy-first, US-stock news enrichment, comma-separated for multiple keys) | Optional |
+| `MINIMAX_API_KEYS` | [MiniMax](https://platform.minimax.io/) Coding Plan Web Search (structured search results) | Optional |
 | `SEARXNG_BASE_URLS` | SearXNG self-hosted instances (quota-free fallback, enable format: json in settings.yml); when empty the app auto-discovers public instances | Optional |
 | `SEARXNG_PUBLIC_INSTANCES_ENABLED` | Auto-discover public SearXNG instances from `searx.space` when `SEARXNG_BASE_URLS` is empty (default `true`) | Optional |
 | `TUSHARE_TOKEN` | [Tushare Pro](https://tushare.pro/weborder/#/login?reg=834638) Token | Optional |
@@ -131,10 +141,10 @@ Go to your forked repo → `Settings` → `Secrets and variables` → `Actions` 
 
 To get started quickly, you need at minimum:
 
-1. **AI Model**: `GEMINI_API_KEY` (recommended) or `OPENAI_API_KEY`
+1. **AI Model**: `ANSPIRE_API_KEYS` (one key for LLMs and search), `AIHUBMIX_KEY` (one key for multiple model families), `GEMINI_API_KEY`, or `OPENAI_API_KEY`
 2. **Notification Channel**: At least one, e.g., `WECHAT_WEBHOOK_URL` or `EMAIL_SENDER` + `EMAIL_PASSWORD`
 3. **Stock List**: `STOCK_LIST` (required)
-4. **Search API**: `TAVILY_API_KEYS` (strongly recommended for news search)
+4. **Search API**: `ANSPIRE_API_KEYS` or `SERPAPI_API_KEYS` (recommended for news and sentiment search)
 
 > Configure these 4 items and you're ready to go!
 
@@ -171,17 +181,22 @@ Default schedule: Every weekday at **18:00 (Beijing Time)** automatic execution.
 | `LITELLM_FALLBACK_MODELS` | Fallback models, comma-separated | - | No |
 | `LLM_CHANNELS` | Channel names (comma-separated), use with `LLM_{NAME}_*`, see [LLM Config Guide](LLM_CONFIG_GUIDE_EN.md) | - | No |
 | `LITELLM_CONFIG` | Advanced model routing YAML path (expert use) | - | No |
+| `ANSPIRE_API_KEYS` | [Anspire](https://open.anspire.cn/?share_code=QFBC0FYC) API key, one key for the LLM gateway and search | - | Optional |
+| `AIHUBMIX_KEY` | [AIHubMix](https://aihubmix.com/?aff=CfMq) API key, one key for multiple model families | - | Optional |
 | `GEMINI_API_KEY` | Google Gemini API Key | - | Optional |
 | `GEMINI_MODEL` | Primary model name (legacy, `LITELLM_MODEL` preferred) | `gemini-3.1-pro-preview` | No |
 | `GEMINI_MODEL_FALLBACK` | Fallback model (legacy) | `gemini-3-flash-preview` | No |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API Key | - | Optional |
 | `OPENAI_API_KEY` | OpenAI-compatible API Key | - | Optional |
 | `OPENAI_BASE_URL` | OpenAI-compatible API endpoint | - | Optional |
 | `OLLAMA_API_BASE` | Ollama local service address (e.g. `http://localhost:11434`), see [LLM Config Guide](LLM_CONFIG_GUIDE_EN.md) | - | Optional |
 | `OPENAI_MODEL` | OpenAI model name (legacy) | `gpt-5.5` | Optional |
 
-> *Note: Configure at least one of `GEMINI_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_API_BASE`, or `LLM_CHANNELS` / `LITELLM_CONFIG`
+> *Note: Configure at least one of `ANSPIRE_API_KEYS`, `AIHUBMIX_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OLLAMA_API_BASE`, or `LLM_CHANNELS` / `LITELLM_CONFIG`. `ANSPIRE_API_KEYS` and `AIHUBMIX_KEY` are auto-adapted without an `OPENAI_BASE_URL`.
 
 ### Notification Channel Configuration
+
+For the P0 notification baseline and diagnostics, see [Notification Baseline](notifications.md).
 
 | Variable | Description | Required |
 |--------|------|:----:|
@@ -212,6 +227,8 @@ Default schedule: Every weekday at **18:00 (Beijing Time)** automatic execution.
 | `PUSHOVER_API_TOKEN` | Pushover API Token | Optional |
 | `PUSHPLUS_TOKEN` | PushPlus Token (Chinese push service) | Optional |
 | `SERVERCHAN3_SENDKEY` | ServerChan v3 Sendkey | Optional |
+| `ASTRBOT_URL` | AstrBot Webhook URL | Optional |
+| `ASTRBOT_TOKEN` | Optional AstrBot Bearer Token | Optional |
 
 > Note: the default `daily_analysis` GitHub Actions workflow only maps fixed variable names. It does not automatically import arbitrary numbered variables such as `STOCK_GROUP_N` / `EMAIL_GROUP_N`. This feature therefore works in local `.env`, Docker, or any runtime where you explicitly inject those variables.
 
@@ -235,12 +252,12 @@ Default schedule: Every weekday at **18:00 (Beijing Time)** automatic execution.
 
 | Variable | Description | Required |
 |--------|------|:----:|
-| `TAVILY_API_KEYS` | Tavily Search API Key (recommended) | Recommended |
-| `ANSPIRE_API_KEYS` | Anspire Open API Key (shared with search and LLM fallback examples; availability depends on account/model entitlement) | Optional |
-| `MINIMAX_API_KEYS` | MiniMax Coding Plan Web Search (structured results) | Optional |
+| `ANSPIRE_API_KEYS` | Anspire Open API Key (shared with search and LLM fallback examples; availability depends on account/model entitlement, and can effectively enhance A-share analysis) | Recommended |
+| `SERPAPI_API_KEYS` | SerpAPI search-engine results for realtime financial news | Recommended |
+| `TAVILY_API_KEYS` | Tavily Search API Key | Optional |
 | `BOCHA_API_KEYS` | Bocha Search API Key (Chinese optimized) | Optional |
 | `BRAVE_API_KEYS` | Brave Search API Key (US stocks optimized) | Optional |
-| `SERPAPI_API_KEYS` | SerpAPI Backup search | Optional |
+| `MINIMAX_API_KEYS` | MiniMax Coding Plan Web Search (structured results) | Optional |
 | `SOCIAL_SENTIMENT_API_KEY` | Stock Sentiment API Key (Reddit / X / Polymarket, US stocks optional) | Optional |
 | `SOCIAL_SENTIMENT_API_URL` | Stock Sentiment API endpoint (default `https://api.adanos.org`) | Optional |
 | `SEARXNG_BASE_URLS` | SearXNG self-hosted instances (quota-free fallback, enable format: json in settings.yml); when empty the app auto-discovers public instances | Optional |
@@ -540,6 +557,8 @@ crontab -e
 ---
 
 ## Notification Channel Configuration
+
+The P0 notification channel matrix and `--check-notify` CLI details are documented in [Notification Baseline](notifications.md).
 
 ### WeChat Work
 
@@ -1011,9 +1030,8 @@ A: Check if Actions is enabled, and if cron expression is correct (note it's UTC
 
 When `AGENT_EVENT_MONITOR_ENABLED=true`, schedule mode polls the rules in `AGENT_EVENT_ALERT_RULES_JSON` every `AGENT_EVENT_MONITOR_INTERVAL_MINUTES` minutes and sends triggered alerts through the existing notification channels. The runtime currently supports three rule types:
 
-> Compatibility and rollback note: this PR only adds/validates Event Monitor rule fields (including `price_change_percent`) and does not change external model/provider API semantics such as model names, providers, Base URL, LiteLLM, `OPENAI_*`, `DEEPSEEK_*`, or `GEMINI_*` configuration.
+> Compatibility and rollback note: this section documents current Event Monitor rule behavior (including `price_change_percent`) and does not change external model/provider API semantics such as model names, providers, Base URL, LiteLLM, `OPENAI_*`, `DEEPSEEK_*`, or `GEMINI_*` configuration.
 > Rollback is explicit: clear or disable `AGENT_EVENT_MONITOR_ENABLED`/related rule config to restore previous behavior.
-> Evidence is in-repo: `src/agent/events.py` (runtime parsing/validation), `src/services/system_config_service.py` (config validation), `src/core/config_registry.py` (metadata), and regression tests in `tests/test_multi_agent.py` + `tests/test_system_config_service.py`.
 
 | `alert_type` | Direction | Threshold | Description |
 | --- | --- | --- | --- |

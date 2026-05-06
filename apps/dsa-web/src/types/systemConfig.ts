@@ -135,6 +135,19 @@ export interface TestLLMChannelRequest {
   models: string[];
   enabled?: boolean;
   timeoutSeconds?: number;
+  capabilityChecks?: LLMCapabilityCheck[];
+}
+
+export type LLMCapabilityCheck = 'json' | 'tools' | 'vision' | 'stream';
+
+export interface LLMCapabilityCheckResult {
+  status: 'passed' | 'failed' | 'skipped';
+  message: string;
+  errorCode?: string | null;
+  stage: string;
+  retryable?: boolean | null;
+  latencyMs?: number | null;
+  details?: Record<string, unknown>;
 }
 
 export interface TestLLMChannelResponse {
@@ -148,6 +161,7 @@ export interface TestLLMChannelResponse {
   resolvedProtocol?: string | null;
   resolvedModel?: string | null;
   latencyMs?: number | null;
+  capabilityResults?: Partial<Record<LLMCapabilityCheck, LLMCapabilityCheckResult>>;
 }
 
 export interface DiscoverLLMChannelModelsRequest {

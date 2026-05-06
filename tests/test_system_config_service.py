@@ -50,6 +50,11 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.manager = ConfigManager(env_path=self.env_path)
         self.service = SystemConfigService(manager=self.manager)
 
+    @staticmethod
+    def _mock_completion_response(content: str = "OK", tool_calls=None):
+        message = SimpleNamespace(content=content, tool_calls=tool_calls or [])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
     def test_get_config_returns_raw_sensitive_values(self) -> None:
         payload = self.service.get_config(include_schema=True)
         items = {item["key"]: item for item in payload["items"]}
@@ -174,6 +179,12 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             status = self.service.get_setup_status()
         slack_complete = next(check for check in status["checks"] if check["key"] == "notification")
         self.assertEqual(slack_complete["status"], "configured")
+
+        self._rewrite_env(*base_lines, "ASTRBOT_URL=https://astrbot.example/webhook")
+        with patch.dict(os.environ, {}, clear=True):
+            status = self.service.get_setup_status()
+        astrbot_complete = next(check for check in status["checks"] if check["key"] == "notification")
+        self.assertEqual(astrbot_complete["status"], "configured")
 
     def test_get_setup_status_uses_runtime_env_without_reloading_singletons(self) -> None:
         self._rewrite_env("")
@@ -857,6 +868,8 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["resolved_protocol"], "openai")
         self.assertEqual(payload["resolved_model"], "openai/deepseek-chat")
+        self.assertEqual(payload["capability_results"], {})
+        self.assertEqual(mock_completion.call_count, 1)
 
     @patch("litellm.completion")
     def test_test_llm_channel_falls_back_to_message_content_when_content_blocks_empty(
@@ -1047,6 +1060,226 @@ class SystemConfigServiceTestCase(unittest.TestCase):
                 if error_code == "format_error":
                     self.assertIn("choices", payload["error"])
 
+    @patch("litellm.completion")
+    def test_test_llm_channel_marks_requested_capabilities_skipped_when_base_fails(self, mock_completion) -> None:
+        mock_completion.side_effect = PermissionError("401 Unauthorized Bearer sk-secret-value")
+
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key="sk-secret-value",
+            models=["gpt-4o-mini"],
+            capability_checks=["json", "tools"],
+        )
+
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["error_code"], "auth")
+        self.assertEqual(payload["details"]["reason"], "api_key_rejected")
+        self.assertEqual(payload["capability_results"]["json"]["status"], "skipped")
+        self.assertEqual(payload["capability_results"]["tools"]["details"]["reason"], "base_test_failed")
+        self.assertEqual(mock_completion.call_count, 1)
+
+    @patch("litellm.completion")
+    def test_test_llm_channel_runs_json_and_tools_capability_checks(self, mock_completion) -> None:
+        tool_call = SimpleNamespace(function=SimpleNamespace(name="dsa_probe_echo"))
+        mock_completion.side_effect = [
+            self._mock_completion_response("OK"),
+            self._mock_completion_response('{"status":"ok"}'),
+            self._mock_completion_response("", tool_calls=[tool_call]),
+        ]
+
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test-value",
+            models=["gpt-4o-mini"],
+            capability_checks=["tools", "json", "tools"],
+        )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(list(payload["capability_results"].keys()), ["json", "tools"])
+        self.assertEqual(payload["capability_results"]["json"]["status"], "passed")
+        self.assertEqual(payload["capability_results"]["tools"]["status"], "passed")
+        self.assertEqual(mock_completion.call_count, 3)
+        self.assertEqual(mock_completion.call_args_list[1].kwargs["response_format"], {"type": "json_object"})
+        self.assertEqual(mock_completion.call_args_list[2].kwargs["tool_choice"]["function"]["name"], "dsa_probe_echo")
+
+    @patch("litellm.completion")
+    def test_test_llm_channel_reports_json_capability_failures(self, mock_completion) -> None:
+        mock_completion.side_effect = [
+            self._mock_completion_response("OK"),
+            self._mock_completion_response("not json"),
+        ]
+
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test-value",
+            models=["gpt-4o-mini"],
+            capability_checks=["json"],
+        )
+
+        self.assertTrue(payload["success"])
+        result = payload["capability_results"]["json"]
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_code"], "format_error")
+        self.assertEqual(result["details"]["reason"], "non_json")
+
+    @patch("litellm.completion")
+    def test_test_llm_channel_runs_stream_capability_check_and_closes_stream(self, mock_completion) -> None:
+        class _Stream:
+            def __init__(self):
+                self.closed = False
+
+            def __iter__(self):
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="OK"))])
+
+            def close(self):
+                self.closed = True
+
+        stream = _Stream()
+        mock_completion.side_effect = [
+            self._mock_completion_response("OK"),
+            stream,
+        ]
+
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test-value",
+            models=["gpt-4o-mini"],
+            capability_checks=["stream"],
+        )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["capability_results"]["stream"]["status"], "passed")
+        self.assertTrue(stream.closed)
+        self.assertTrue(mock_completion.call_args_list[1].kwargs["stream"])
+
+    @patch("litellm.completion")
+    def test_test_llm_channel_ignores_stream_close_failures(self, mock_completion) -> None:
+        class _Stream:
+            def __init__(self):
+                self.close_attempted = False
+
+            def __iter__(self):
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="OK"))])
+
+            def close(self):
+                self.close_attempted = True
+                raise RuntimeError("transport already closed")
+
+        stream = _Stream()
+        mock_completion.side_effect = [
+            self._mock_completion_response("OK"),
+            stream,
+        ]
+
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test-value",
+            models=["gpt-4o-mini"],
+            capability_checks=["stream"],
+        )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["capability_results"]["stream"]["status"], "passed")
+        self.assertTrue(stream.close_attempted)
+
+    @patch("litellm.completion")
+    def test_test_llm_channel_runs_vision_capability_check(self, mock_completion) -> None:
+        mock_completion.side_effect = [
+            self._mock_completion_response("OK"),
+            self._mock_completion_response("OK"),
+        ]
+
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test-value",
+            models=["gpt-4o-mini"],
+            capability_checks=["vision"],
+        )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["capability_results"]["vision"]["status"], "passed")
+        vision_content = mock_completion.call_args_list[1].kwargs["messages"][0]["content"]
+        self.assertEqual(vision_content[1]["type"], "image_url")
+        self.assertTrue(vision_content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
+
+    @patch("litellm.completion")
+    def test_test_llm_channel_classifies_capability_unsupported(self, mock_completion) -> None:
+        mock_completion.side_effect = [
+            self._mock_completion_response("OK"),
+            Exception("response_format is not supported"),
+        ]
+
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key="sk-test-value",
+            models=["gpt-4o-mini"],
+            capability_checks=["json"],
+        )
+
+        result = payload["capability_results"]["json"]
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_code"], "capability_unsupported")
+        self.assertEqual(result["details"]["reason"], "capability_unsupported")
+
+    @patch("litellm.completion")
+    def test_test_llm_channel_adds_focused_diagnostic_reasons(self, mock_completion) -> None:
+        class RateLimitError(Exception):
+            pass
+
+        cases = [
+            (Exception("account balance insufficient"), "quota", "insufficient_balance"),
+            (RateLimitError("account balance insufficient"), "quota", "insufficient_balance"),
+            (RateLimitError("insufficient_quota"), "quota", "quota_exceeded"),
+            (Exception("DNS lookup failed"), "network_error", "dns_error"),
+            (Exception("TLS certificate verify failed"), "network_error", "tls_error"),
+            (Exception("Connection refused"), "network_error", "connection_refused"),
+            (Exception("model gpt-4o is not authorized for this account"), "model_not_found", "model_access_denied"),
+            (Exception("LLM Provider NOT provided for model foo"), "model_not_found", "provider_prefix_mismatch"),
+        ]
+
+        for exc, error_code, reason in cases:
+            with self.subTest(reason=reason):
+                mock_completion.reset_mock()
+                mock_completion.side_effect = exc
+                payload = self.service.test_llm_channel(
+                    name="primary",
+                    protocol="openai",
+                    base_url="https://api.example.com/v1",
+                    api_key="sk-test-value",
+                    models=["gpt-4o-mini"],
+                )
+
+                self.assertFalse(payload["success"])
+                self.assertEqual(payload["error_code"], error_code)
+                self.assertEqual(payload["details"]["reason"], reason)
+
+    def test_test_llm_channel_reports_comma_only_api_key_as_missing(self) -> None:
+        payload = self.service.test_llm_channel(
+            name="primary",
+            protocol="openai",
+            base_url="https://api.example.com/v1",
+            api_key=", ,",
+            models=["gpt-4o-mini"],
+        )
+
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["error_code"], "invalid_config")
+        self.assertEqual(payload["details"]["reason"], "missing_api_key")
+
     @patch("src.services.system_config_service.requests.get")
     def test_discover_llm_channel_models_returns_deduped_ids(self, mock_get) -> None:
         mock_response = Mock()
@@ -1088,13 +1321,25 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         auth_response.json.return_value = {"error": {"message": "invalid api key sk-secret-value"}}
         not_found_response = Mock(ok=False, status_code=404, text="not found")
         not_found_response.json.return_value = {"error": {"message": "not found"}}
+        billing_response = Mock(ok=False, status_code=402, text="account balance insufficient")
+        billing_response.json.return_value = {"error": {"message": "account balance insufficient"}}
+        billing_rate_limit_response = Mock(ok=False, status_code=429, text="account balance insufficient")
+        billing_rate_limit_response.json.return_value = {"error": {"message": "account balance insufficient"}}
+        quota_exceeded_response = Mock(ok=False, status_code=429, text="insufficient_quota")
+        quota_exceeded_response.json.return_value = {"error": {"message": "insufficient_quota"}}
+        rate_limit_response = Mock(ok=False, status_code=429, text="too many requests")
+        rate_limit_response.json.return_value = {"error": {"message": "too many requests"}}
         invalid_json_response = Mock(ok=True, status_code=200, text="<html>bad gateway</html>")
         invalid_json_response.json.side_effect = ValueError("invalid json")
 
-        for response, error_code, stage, retryable in [
-            (auth_response, "auth", "model_discovery", False),
-            (not_found_response, "network_error", "model_discovery", False),
-            (invalid_json_response, "format_error", "response_parse", False),
+        for response, error_code, stage, retryable, reason in [
+            (auth_response, "auth", "model_discovery", False, "api_key_rejected"),
+            (not_found_response, "network_error", "model_discovery", False, "endpoint_not_found"),
+            (billing_response, "quota", "model_discovery", True, "insufficient_balance"),
+            (billing_rate_limit_response, "quota", "model_discovery", True, "insufficient_balance"),
+            (quota_exceeded_response, "quota", "model_discovery", True, "quota_exceeded"),
+            (rate_limit_response, "quota", "model_discovery", True, "rate_limit"),
+            (invalid_json_response, "format_error", "response_parse", False, "non_json"),
         ]:
             with self.subTest(error_code=error_code):
                 mock_get.return_value = response
@@ -1109,6 +1354,7 @@ class SystemConfigServiceTestCase(unittest.TestCase):
                 self.assertEqual(payload["error_code"], error_code)
                 self.assertEqual(payload["stage"], stage)
                 self.assertEqual(payload["retryable"], retryable)
+                self.assertEqual(payload["details"]["reason"], reason)
                 if error_code == "auth":
                     self.assertNotIn("sk-secret-value", payload["error"])
 

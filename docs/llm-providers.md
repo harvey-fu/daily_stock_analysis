@@ -1,20 +1,33 @@
-# LLM 服务商配置速查
+# LLM 服务商配置指南
 
-本文面向首次配置用户，说明 Web 设置页「AI 模型配置」预设与 `.env` 多渠道变量的对应关系。实际可用模型、额度、区域限制和价格以各服务商控制台为准；如果模型列表拉取失败，可在 Web 中手动填写模型名。
+本文面向首次配置用户，说明如何选择 LLM 配置方式、如何把 Web 设置页「AI 模型配置」预设映射到 `.env` / GitHub Actions，以及如何处理常见检测错误。
 
-Web 设置页展示的 provider 能力标签、官方来源链接和配置注意事项来自静态 provider template，仅用于配置参考，不代表运行时能力已验证通过。
+实际可用模型、额度、区域限制和价格以各服务商控制台为准；如果模型列表拉取失败，可在 Web 中手动填写模型名。Web 设置页展示的 provider 能力标签、官方来源链接和配置注意事项来自静态 provider template，仅用于配置参考，不代表运行时能力已验证通过。
 
-## 配置方式
+## 先选配置方式
 
-推荐优先使用 Web 设置页：
+| 方式 | 适合谁 | 主要变量 | 说明 |
+| --- | --- | --- | --- |
+| 极简 legacy | 只想快速跑通一个模型的用户 | `LITELLM_MODEL` + 对应 provider key | 最少变量，适合本地快速开始；不适合复杂 fallback。 |
+| Channels | 需要多个 provider、多个 key 或 fallback 的用户 | `LLM_CHANNELS` + `LLM_<CHANNEL>_*` | 推荐默认路径；Web 设置页保存的也是这一层配置。 |
+| YAML | 熟悉 LiteLLM 路由、负载均衡和企业网关的用户 | `LITELLM_CONFIG` / `LITELLM_CONFIG_YAML` | 优先级最高；一旦有效生效，Channels 和 legacy 不再参与本次请求。 |
+
+优先级保持不变：`LITELLM_CONFIG` / `LITELLM_CONFIG_YAML` > `LLM_CHANNELS` > legacy provider keys。P4 只补文档，不迁移、不清空、不静默改写旧配置。
+
+## Web 设置页路径
+
+推荐优先使用 Web 设置页完成 Channels 配置：
 
 1. 打开设置页的「AI 模型配置」。
 2. 在「快速添加渠道」选择服务商预设。
 3. 填入 API Key，必要时点击「获取模型」。
 4. 选择主模型、Agent 主模型、备选模型和 Vision 模型后保存。
 5. 点击「测试连接」确认鉴权、模型名、额度和响应格式正常。
+6. 如需确认 JSON / tools / stream / vision 能力，手动勾选「运行时能力检测」后再触发；该检测会产生真实 LLM 请求，结果只代表当前账号、模型和 endpoint 的一次 best-effort 检测，不会写回 `.env`，也不会阻止保存。
 
-也可以直接在 `.env` 使用多渠道格式：
+## Channels 示例
+
+### DeepSeek 官方渠道
 
 ```env
 LLM_CHANNELS=deepseek
@@ -24,6 +37,18 @@ LLM_DEEPSEEK_API_KEY=sk-xxx
 LLM_DEEPSEEK_MODELS=deepseek-v4-flash,deepseek-v4-pro
 LITELLM_MODEL=deepseek/deepseek-v4-flash
 ```
+
+### OpenAI-compatible 聚合或自定义网关
+
+```env
+LLM_CHANNELS=my_proxy
+LLM_MY_PROXY_PROTOCOL=openai
+LLM_MY_PROXY_BASE_URL=https://your-proxy.example.com/v1
+LLM_MY_PROXY_API_KEY=sk-xxx
+LLM_MY_PROXY_MODELS=gpt-5.5,claude-sonnet-4-6
+```
+
+OpenAI-compatible Base URL 只填到服务商兼容入口，不额外拼接 `/chat/completions`。本地 `.env`、Docker 和自托管脚本可以直接使用自定义 channel；GitHub Actions 需要 workflow 显式透传同名 `LLM_MY_PROXY_*` 变量。
 
 ## 常用服务商预设
 
@@ -60,9 +85,17 @@ LITELLM_MODEL=deepseek/deepseek-v4-flash
 | 火山方舟 / 豆包 | [在线推理（常规）](https://www.volcengine.com/docs/82379/2121998)、[模型列表](https://www.volcengine.com/docs/82379/1949118) | 官方示例使用 `https://ark.cn-beijing.volces.com/api/v3` 与 `doubao-seed-1-6-251015`；如使用 Coding Plan，请改用其专用 Base URL 和模型名，不要套用本表的在线推理模板。 |
 | SiliconFlow | [模型列表](https://docs.siliconflow.cn/quickstart/models)、[获取模型列表 API](https://docs.siliconflow.cn/cn/api-reference/models/get-model-list) | 平台模型实时更新且 `/models` 需要 API Key；模板只给常见新模型示例，保存前建议在 Web 设置页点击「获取模型」确认账号可见性。 |
 | OpenRouter | [Models API](https://openrouter.ai/docs/api/api-reference/models/get-models) | OpenRouter 支持 `~anthropic/claude-sonnet-latest`、`~openai/gpt-latest` 等 latest router alias；2026-05-03 的一次手动 live smoke 以 Claude Sonnet latest 作为默认示例通过，GPT latest 保留为可按账号权限切换的备选。 |
-| LiteLLM | [OpenAI-Compatible Endpoints](https://docs.litellm.ai/docs/providers/openai_compatible) | OpenAI 兼容端点需要把运行时模型写成 `openai/<model>`，Base URL 只填到服务商兼容入口，不额外拼接 `/chat/completions`。 |
+| LiteLLM | [OpenAI-Compatible Endpoints](https://docs.litellm.ai/docs/providers/openai_compatible) | OpenAI-compatible 端点需要把运行时模型写成 `openai/<model>`，Base URL 只填到服务商兼容入口，不额外拼接 `/chat/completions`。 |
 
-当前仓库锁定 `litellm>=1.80.10,<1.82.7`（见 `requirements.txt`）。本页预设只保证配置形状与当前依赖的 OpenAI-compatible 路由规则一致；实际连通性仍取决于服务商账号权限、地域、额度和模型开通状态。回退方式：在 Web 设置页删除对应渠道，或从 `.env` 移除 `ANSPIRE_LLM_*`、`LLM_ANSPIRE_*`、`LLM_MINIMAX_*` / `LLM_VOLCENGINE_*` 并恢复原 `LITELLM_MODEL`、`LITELLM_FALLBACK_MODELS`。
+本页预设只保证配置形状与当前依赖的 OpenAI-compatible 路由规则一致；实际连通性仍取决于服务商账号权限、地域、额度和模型开通状态。当前 LiteLLM 版本约束为 `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0`（见 `requirements.txt`），保留历史最低版本、显式排除 PyPI 事故版本，并避免未来大版本自动进入。
+
+## OpenAI-compatible 与 LiteLLM 规则
+
+- OpenAI-compatible provider 的 channel `protocol` 通常是 `openai`。
+- 运行时模型名通常写成 `openai/<model>`；例如自定义网关里的 `gpt-5.5` 可以作为 `openai/gpt-5.5` 被 LiteLLM 路由。
+- `Qwen/...`、`deepseek-ai/...` 这类是服务商或模型仓库组织名前缀，不等同于 LiteLLM provider prefix；不要因为它们包含斜杠就误判为 `provider/model` 路由。
+- Base URL 只填官方或网关给出的兼容入口，通常到 `/v1`、`/api/v3` 或厂商文档指定路径；不要手动追加 `/chat/completions`。
+- 如果使用 YAML 模式，按 LiteLLM `model_list` / `litellm_params` 的原生语义配置；YAML 有效时优先级高于 Channels。
 
 ## GitHub Actions 配置
 
@@ -77,15 +110,52 @@ LITELLM_MODEL=deepseek/deepseek-v4-flash
 | `LLM_<CHANNEL>_ENABLED` | Variables 或 Secrets | 可选，未配置时默认启用；设为 `false` 可跳过该渠道。 |
 | `LLM_<CHANNEL>_API_KEY` / `LLM_<CHANNEL>_API_KEYS` | Secrets | 密钥字段必须放 Repository Secrets；同名 Variables 不会被 workflow 读取。 |
 | `LLM_<CHANNEL>_EXTRA_HEADERS` | Secrets 或 Variables | JSON 字符串；只要包含鉴权、租户、组织或私有网关信息，就应放 Secrets。 |
+| `LITELLM_CONFIG` | Variables 或 Secrets | YAML 文件路径；配合 `LITELLM_CONFIG_YAML` 使用时，workflow 会写入该路径。 |
+| `LITELLM_CONFIG_YAML` | Secrets 优先 | YAML 内容本身可能包含私有网关或 header，建议放 Secrets。 |
 
 默认 workflow 已显式映射 `primary`、`secondary`、`aihubmix`、`anspire`、`deepseek`、`dashscope`、`zhipu`、`moonshot`、`minimax`、`volcengine`、`siliconflow`、`openrouter`、`gemini`、`anthropic`、`openai`、`ollama`。如果使用自定义渠道名（如 `my_proxy`），仅在 Repository Secrets / Variables 中新增 `LLM_MY_PROXY_*` 不会自动生效，需要同步扩展 workflow 的 `env:` 映射；本地 `.env`、Docker 和自托管脚本不受这个限制。
 
 Ollama 默认 Base URL `http://127.0.0.1:11434` 主要面向本地、Docker 或能访问该服务的 self-hosted runner。GitHub-hosted runner 通常没有本地 Ollama 服务，直接配置 `LLM_CHANNELS=ollama` 大概率会连接失败。
 
-## 排障要点
+## 常见错误与处理建议
 
-- 鉴权失败：检查 API Key 是否填错、复制了空格，或服务商是否要求额外项目权限。
-- 模型不存在：先在 Web 中点击「获取模型」，若服务商不支持 `/models`，改为手动填写控制台里的模型 ID。
-- 请求超时：检查 Base URL、代理、防火墙和本地 Ollama 服务是否可达。
-- 空响应或格式异常：尝试换用兼容 Chat Completions 的模型，或切换到该服务商推荐的 OpenAI Compatible 入口。
-- 多渠道 fallback：把备用渠道模型写入 `LITELLM_FALLBACK_MODELS`，单个模型失败时主流程会继续尝试备用模型。
+| `details.reason` / 现象 | 常见原因 | 建议处理 |
+| --- | --- | --- |
+| `missing_api_key` | API Key 为空，或 `API_KEYS` 逗号分隔后没有任何非空片段。 | 填入至少一个有效 key；本地 Ollama 或 localhost 兼容服务除外。 |
+| `api_key_rejected` | 服务商返回 401 / 403，key 无效、权限不足或项目未开通。 | 重新复制 key，检查账号项目、组织、区域和模型权限。 |
+| `insufficient_balance` | 余额不足、账单未开通或套餐额度耗尽。 | 到服务商控制台确认余额、账单状态和模型套餐。 |
+| `quota_exceeded` | 账号或组织配额耗尽。 | 检查套餐、项目额度、组织额度和服务商账单页。 |
+| `rate_limit` | RPM / TPM / 并发限制触发。 | 降低并发，换轻量模型，或在控制台提升限额。 |
+| `timeout` | 请求超时，可能是网络慢、服务商响应慢或本地服务无响应。 | 检查代理、防火墙、Base URL、模型冷启动和 timeout 设置。 |
+| `dns_error` | 域名无法解析。 | 检查 Base URL 拼写、DNS、代理和运行环境网络。 |
+| `tls_error` | TLS 证书、代理或中间人证书异常。 | 检查 HTTPS 证书链、公司代理、自签证书和系统时间。 |
+| `connection_refused` | 目标端口无服务，或本地服务未启动。 | 检查 Base URL、端口、防火墙；Ollama 确认本机或 runner 能访问服务。 |
+| `endpoint_not_found` | `/models` 或 chat endpoint 路径不存在。 | 确认 Base URL 是否填到兼容入口，不要多拼或少拼厂商要求的路径。 |
+| `model_access_denied` | 模型不存在、未开通或账号不可见。 | 在 Web 中点击「获取模型」；不支持 `/models` 时以控制台模型 ID 为准。 |
+| `provider_prefix_mismatch` | LiteLLM provider prefix 与渠道协议不匹配。 | OpenAI-compatible 渠道通常使用 `openai/<model>`；不要把 `Qwen/...`、`deepseek-ai/...` 误当 provider prefix。 |
+| `non_json` | 服务商返回非 JSON 或代理返回 HTML / 文本错误页。 | 检查 Base URL、网关路径、代理错误页和 Chat Completions 兼容入口。 |
+| `null_response` | LiteLLM 没有返回可解析响应对象。 | 检查 provider 是否兼容 Chat Completions，必要时换模型或 endpoint 重试。 |
+| `null_content` | Chat completion 返回成功但 `content` 为空。 | 换用兼容文本输出的模型，或检查是否强制 tool / vision 响应。 |
+| `malformed_choices` | 响应缺少兼容的 `choices` 结构。 | 确认 endpoint 是 Chat Completions 兼容接口，不是 Embeddings、Responses 或其它协议入口。 |
+| `capability_unsupported` | JSON / tools / stream / vision smoke 参数不被当前模型或 endpoint 支持。 | 换支持该能力的模型，或把结果视为当前账号、模型和 endpoint 的一次能力诊断，不代表 provider 全局不支持。 |
+| `unknown_error` | 服务商或客户端抛出未能细分的异常。 | 先查看 `details.message` / 日志中的原始错误，再按网络、鉴权、模型名和额度逐项排查。 |
+
+完整分类逻辑以 `src/services/system_config_service.py` 中的错误分类实现为准。
+
+## 运行时能力检测边界
+
+- JSON / tools / stream / vision smoke 必须在 Web 中显式触发。
+- 检测会产生真实 LLM 请求，可能带来 token / 图像输入费用、RPM/TPM 限流、余额不足或超时。
+- 检测结果只代表当前账号、模型和 endpoint 的一次 best-effort 运行时结果。
+- 检测结果不会写回 `.env`，也不会阻止保存配置。
+- 能力检测失败不等于 provider 全局不支持；失败可能来自账号权限、模型未开通、endpoint 区域、余额、服务商兼容层或 LiteLLM 转换路径。
+- 当前实现未对所有真实 provider 做在线 smoke，兼容依据是 `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0`（见 `requirements.txt`）、[LiteLLM Python SDK / OpenAI I/O format](https://docs.litellm.ai/)、[LiteLLM OpenAI-compatible 路由](https://docs.litellm.ai/docs/providers/openai_compatible)，以及 OpenAI Chat Completions 的 [JSON mode](https://platform.openai.com/docs/guides/structured-outputs?api-mode=chat)、[tool calling](https://platform.openai.com/docs/guides/function-calling?api-mode=chat)、[streaming](https://platform.openai.com/docs/guides/streaming-responses?api-mode=chat) 和 [vision input](https://platform.openai.com/docs/guides/images-vision?api-mode=chat) 请求形状。
+
+## 回滚方式
+
+- Web 设置页：删除或禁用对应 channel，重新选择旧的主模型 / Agent 模型 / fallback。
+- `.env`：恢复备份中的 `LLM_*`、`LITELLM_MODEL`、`AGENT_LITELLM_MODEL`、`VISION_MODEL`、`LITELLM_FALLBACK_MODELS`。
+- 从 Channels 回到 legacy：删除或清空 `LLM_CHANNELS`，保留 legacy provider key 和 `LITELLM_MODEL`。
+- 从 YAML 回到 Channels / legacy：移除 `LITELLM_CONFIG` / `LITELLM_CONFIG_YAML`，重启后下层配置重新生效。
+- 桌面端：使用导出的配置备份恢复。
+- PR 回滚：revert 对应 docs PR；P4 不涉及配置、数据或代码迁移。

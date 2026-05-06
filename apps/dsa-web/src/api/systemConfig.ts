@@ -84,7 +84,7 @@ function toSnakeImportPayload(payload: ImportSystemConfigRequest): Record<string
 }
 
 function toSnakeTestChannelPayload(payload: TestLLMChannelRequest): Record<string, unknown> {
-  return {
+  const request: Record<string, unknown> = {
     name: payload.name,
     protocol: payload.protocol,
     base_url: payload.baseUrl ?? '',
@@ -93,6 +93,10 @@ function toSnakeTestChannelPayload(payload: TestLLMChannelRequest): Record<strin
     enabled: payload.enabled ?? true,
     timeout_seconds: payload.timeoutSeconds ?? 20,
   };
+  if (payload.capabilityChecks && payload.capabilityChecks.length > 0) {
+    request.capability_checks = payload.capabilityChecks;
+  }
+  return request;
 }
 
 function toSnakeDiscoverModelsPayload(payload: DiscoverLLMChannelModelsRequest): Record<string, unknown> {

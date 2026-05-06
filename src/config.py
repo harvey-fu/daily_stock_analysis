@@ -2400,6 +2400,7 @@ class Config:
             or self.pushplus_token
             or self.serverchan3_sendkey
             or self.custom_webhook_urls
+            or self.astrbot_url
             or (self.discord_bot_token and self.discord_main_channel_id)
             or self.discord_webhook_url
             or self.slack_webhook_url

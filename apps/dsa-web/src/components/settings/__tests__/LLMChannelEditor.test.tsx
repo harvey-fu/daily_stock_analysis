@@ -175,9 +175,6 @@ describe('LLMChannelEditor', () => {
       'https://openrouter.ai/docs/api/api-reference/models/get-models',
     );
     expect(screen.getByText(/能力标签仅用于配置参考，不代表运行时能力已验证通过/i)).toBeInTheDocument();
-    expect(screen.queryByText('JSON')).not.toBeInTheDocument();
-    expect(screen.queryByText('Tools')).not.toBeInTheDocument();
-    expect(screen.queryByText('Stream')).not.toBeInTheDocument();
   });
 
   it('shows model-discovery capability for SiliconFlow provider hints', async () => {
@@ -943,6 +940,162 @@ describe('LLMChannelEditor', () => {
 
     expect(await screen.findByText(/聊天调用 · 鉴权失败：LLM authentication failed/i)).toBeInTheDocument();
     expect(screen.getByText(/请检查 API Key 是否正确/i)).toBeInTheDocument();
+  });
+
+  it('shows focused quota exceeded troubleshooting hints', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM request was rejected by quota or rate limiting',
+      error: 'quota exceeded',
+      errorCode: 'quota',
+      stage: 'chat_completion',
+      retryable: true,
+      details: { reason: 'quota_exceeded' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-4o-mini',
+      latencyMs: null,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    expect(await screen.findByText(/服务商返回配额已耗尽/i)).toBeInTheDocument();
+  });
+
+  it('does not request runtime capabilities during the basic connection test', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: true,
+      message: 'LLM channel test succeeded',
+      error: null,
+      errorCode: null,
+      stage: 'chat_completion',
+      retryable: false,
+      details: {},
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-4o-mini',
+      latencyMs: 80,
+      capabilityResults: {},
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    await screen.findByText(/连接成功 · openai\/gpt-4o-mini/i);
+    expect(testLLMChannel).toHaveBeenCalledWith(expect.not.objectContaining({ capabilityChecks: expect.anything() }));
+  });
+
+  it('runs explicit runtime capability checks and shows detailed hints', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: true,
+      message: 'LLM channel test succeeded',
+      error: null,
+      errorCode: null,
+      stage: 'chat_completion',
+      retryable: false,
+      details: {},
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-4o-mini',
+      latencyMs: 80,
+      capabilityResults: {
+        json: {
+          status: 'passed',
+          message: 'JSON output capability check passed',
+          errorCode: null,
+          stage: 'capability_json',
+          retryable: false,
+          details: { reason: 'json_valid' },
+        },
+        tools: {
+          status: 'failed',
+          message: 'LLM channel does not support tools capability',
+          errorCode: 'capability_unsupported',
+          stage: 'capability_tools',
+          retryable: false,
+          details: { reason: 'capability_unsupported' },
+        },
+      },
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
+    fireEvent.click(screen.getByLabelText('JSON'));
+    fireEvent.click(screen.getByLabelText('Tools'));
+    fireEvent.click(screen.getByRole('button', { name: '检测能力' }));
+
+    expect(await screen.findByText(/能力检测完成：1 通过 \/ 1 失败 \/ 0 跳过/i)).toBeInTheDocument();
+    expect(screen.getByText('JSON 通过')).toBeInTheDocument();
+    expect(screen.getByText('Tools 失败')).toBeInTheDocument();
+    expect(screen.getByText(/当前模型或兼容层不支持该能力/i)).toBeInTheDocument();
+    expect(testLLMChannel).toHaveBeenCalledWith(expect.objectContaining({ capabilityChecks: ['json', 'tools'] }));
+  });
+
+  it('shows skipped runtime capabilities when the base test fails', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM authentication failed',
+      error: '401 Unauthorized',
+      errorCode: 'auth',
+      stage: 'chat_completion',
+      retryable: false,
+      details: { reason: 'api_key_rejected' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-4o-mini',
+      latencyMs: null,
+      capabilityResults: {
+        json: {
+          status: 'skipped',
+          message: 'Skipped because the base channel test did not pass',
+          errorCode: 'skipped',
+          stage: 'capability_json',
+          retryable: false,
+          details: { reason: 'base_test_failed' },
+        },
+      },
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'bad-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
+    fireEvent.click(screen.getByLabelText('JSON'));
+    fireEvent.click(screen.getByRole('button', { name: '检测能力' }));
+
+    expect(await screen.findByText(/能力检测完成：0 通过 \/ 0 失败 \/ 1 跳过/i)).toBeInTheDocument();
+    expect(screen.getByText('JSON 跳过')).toBeInTheDocument();
+    expect(screen.getByText(/服务商拒绝了当前 API Key/i)).toBeInTheDocument();
+    expect(screen.getByLabelText('模型（逗号分隔）')).toBeEnabled();
   });
 
   it('keeps manual model input available when discovery fails', async () => {

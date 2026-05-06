@@ -4,6 +4,8 @@ Welcome! Whether you are a beginner newly exposed to AI or a veteran skilled wit
 
 This project exposes a unified AI model access flow that supports official APIs, OpenAI-compatible platforms, and local models. Under the hood it is powered by [LiteLLM](https://docs.litellm.ai/), but most users only need to think in terms of picking a provider, adding an API key, and optionally choosing a primary model or channels. To cater to different experience levels, we provide a three-tier configuration hierarchy. Choose the method that fits you best.
 
+If you are choosing a concrete provider, setting up GitHub Actions Secrets / Variables, troubleshooting a `details.reason` error, or rolling back an LLM configuration, start with the [Provider Configuration Guide](./llm-providers.md). It is the maintained reference for provider presets, Actions variable mapping, runtime capability-check boundaries, and common error handling.
+
 ---
 
 ## Quick Navigation: Which section should you read?
@@ -73,10 +75,10 @@ OLLAMA_API_BASE=http://localhost:11434
 LITELLM_MODEL=ollama/qwen3:8b
 ```
 
-> **Important**: Ollama must be configured with `OLLAMA_API_BASE`. **Do not** use `OPENAI_BASE_URL`, or the system will concatenate URLs incorrectly (e.g. 404, `api/generate/api/show`). For remote Ollama, set `OLLAMA_API_BASE` to the actual address (e.g. `http://192.168.1.100:11434`). Current dependency requirement is LiteLLM ≥1.80.10 (matches requirements.txt).
+> **Important**: Ollama must be configured with `OLLAMA_API_BASE`. **Do not** use `OPENAI_BASE_URL`, or the system will concatenate URLs incorrectly (e.g. 404, `api/generate/api/show`). For remote Ollama, set `OLLAMA_API_BASE` to the actual address (e.g. `http://192.168.1.100:11434`). Current dependency constraint is `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` (matches requirements.txt).
 
 > **Congratulations! If you're a beginner, you can stop reading here and run the program!**
-> Want to test the connection? Open your terminal in the root directory and run: `python test_env.py --llm`
+> Want to test the connection? Open your terminal in the root directory and run: `python scripts/check_env.py --llm`
 
 ---
 
@@ -95,17 +97,19 @@ The backend exposes a read-only status endpoint at `GET /api/v1/system/config/se
 ### Web channel editor: compatibility, migration, and rollback rules
 
 - The preset provider / Base URL / sample models are **form defaults only**. What gets persisted is still exactly what you submit in `LLM_{CHANNEL}_PROTOCOL`, `LLM_{CHANNEL}_BASE_URL`, `LLM_{CHANNEL}_MODELS`, and `LLM_{CHANNEL}_API_KEY(S)`; the editor does not silently rewrite them to a different provider name or URL.
-- "Discover models" only calls `{base_url}/models` for `OpenAI Compatible` / `DeepSeek` channels, and "Test connection" only sends one minimal chat completion request. The returned `stage / error_code / details / latency_ms` fields are for structured diagnostics only and are **never persisted** back into `.env`.
+- "Discover models" only calls `{base_url}/models` for `OpenAI Compatible` / `DeepSeek` channels, and the default "Test connection" action only sends one minimal chat completion request. Optional runtime capability checks must be explicitly selected by the user and send additional JSON / tools / stream / vision smoke requests; the result only represents a best-effort check for the current account, model, and endpoint at that moment. The returned `stage / error_code / details / latency_ms / capability_results` fields are for structured diagnostics only, are **never persisted** back into `.env`, and do not block saving.
+- Runtime capability checks send real LLM requests and may incur token / image-input cost, RPM/TPM rate limiting, insufficient balance errors, or timeouts. A failed check may come from account permissions, model entitlement, endpoint region, balance, provider compatibility layers, or LiteLLM translation behavior; it does not prove that the provider globally lacks that capability. P3 does not include online smoke coverage for every real provider. Its compatibility basis is the repository dependency constraint `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0`, LiteLLM `completion()` / OpenAI I/O format / streaming / exception mapping, and the OpenAI Chat Completions shapes for JSON mode, tool calling, streaming, and vision input.
+- External references: LiteLLM Python SDK / OpenAI I/O format / streaming / exception mapping: <https://docs.litellm.ai/>; LiteLLM OpenAI-compatible routing: <https://docs.litellm.ai/docs/providers/openai_compatible>; OpenAI Chat Completions: <https://platform.openai.com/docs/api-reference/chat/create>; JSON mode: <https://platform.openai.com/docs/guides/structured-outputs?api-mode=chat>; tool calling: <https://platform.openai.com/docs/guides/function-calling?api-mode=chat>; streaming: <https://platform.openai.com/docs/guides/streaming-responses?api-mode=chat>; vision input: <https://platform.openai.com/docs/guides/images-vision?api-mode=chat>.
 - Saving channels only updates the keys submitted in that save operation; there is no whole-config silent migration when you switch channel settings. The one deliberate cleanup is runtime model references: if `LITELLM_MODEL`, `AGENT_LITELLM_MODEL`, `VISION_MODEL`, or `LITELLM_FALLBACK_MODELS` point to models that no longer exist in the currently enabled channels, the editor clears/removes those stale references before saving so runtime calls do not keep targeting invalid models. Even when enabled channels expose no selectable models, stale managed-provider values without a matching legacy key are cleaned. `cohere/*`, `google/*`, and `xai/*` are kept as explicit direct-env compatibility examples for legacy retention behavior only, and are not a runtime availability guarantee.
 - Backend consistency basis: runtime validation in `SystemConfigService._validate_llm_runtime_selection` (`src/services/system_config_service.py`) relies on `_uses_direct_env_provider` (`src/config.py`). Only `gemini`, `vertex_ai`, `anthropic`, `openai`, and `deepseek` are treated as managed key-backed providers; `cohere`, `google`, and `xai` are not in that allowlist, so they remain valid direct provider runtime entries.
 - Rollback stays minimal: restore the previous channel model list and re-select the runtime models, or restore the previous `LLM_*`, `LITELLM_MODEL`, `AGENT_LITELLM_MODEL`, `VISION_MODEL`, and `LLM_TEMPERATURE` values from your desktop export / manual `.env` backup. No extra migration script is required.
-- The current dependency window for this flow in the repository is `litellm>=1.80.10,<1.82.7` (see `requirements.txt`). Regression coverage for it lives in `tests/test_system_config_service.py`, `tests/test_system_config_api.py`, and `apps/dsa-web/src/components/settings/__tests__/LLMChannelEditor.test.tsx`.
+- The current dependency constraint for this flow in the repository is `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` (see `requirements.txt`). Regression coverage for it lives in `tests/test_system_config_service.py`, `tests/test_system_config_api.py`, and `apps/dsa-web/src/components/settings/__tests__/LLMChannelEditor.test.tsx`.
 
-> **External provider model examples notice**: `cohere/*`, `google/*`, and `xai/*` provider-prefixed values are included here only to describe current runtime retention behavior and are **not** a global availability guarantee. Specific model names in docs or tests are configuration-retention examples, not production recommendations. Check the provider's official model/API docs and validate against the repository dependency window `litellm>=1.80.10,<1.82.7` before production use.
+> **External provider model examples notice**: `cohere/*`, `google/*`, and `xai/*` provider-prefixed values are included here only to describe current runtime retention behavior and are **not** a global availability guarantee. Specific model names in docs or tests are configuration-retention examples, not production recommendations. Check the provider's official model/API docs and validate against the repository dependency constraint `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` before production use.
 
 ### Rollback & compatibility evidence
 
-- Scope and cleanup behavior under `litellm>=1.80.10,<1.82.7`: only runtime references (`LITELLM_MODEL`, `AGENT_LITELLM_MODEL`, `VISION_MODEL`, `LITELLM_FALLBACK_MODELS`) are sanitized during save; non-channel direct providers such as `cohere/*`, `google/*`, and `xai/*` are preserved.
+- Scope and cleanup behavior under `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0`: only runtime references (`LITELLM_MODEL`, `AGENT_LITELLM_MODEL`, `VISION_MODEL`, `LITELLM_FALLBACK_MODELS`) are sanitized during save; non-channel direct providers such as `cohere/*`, `google/*`, and `xai/*` are preserved.
 - Rollback path: export desktop config, then restore the backup through `POST /api/v1/system/config/import`; or manually restore historical `.env` entries (`LITELLM_*`, `AGENT_LITELLM_MODEL`, `VISION_MODEL`, `LLM_TEMPERATURE`) and restart.
 - Rollback evidence: `tests/test_system_config_service.py::test_import_desktop_env_restores_runtime_models_after_cleanup` covers restore from exported desktop backup after runtime cleanup.
 - Direct-provider evidence: `tests/test_system_config_service.py::SystemConfigServiceTestCase::test_validate_accepts_minimax_model_as_direct_env_provider`, `test_validate_accepts_cohere_model_as_direct_env_provider`, `test_validate_accepts_google_model_as_direct_env_provider`, and `test_validate_accepts_xai_model_as_direct_env_provider` cover the preserved direct-provider behavior.
@@ -192,7 +196,7 @@ LITELLM_MODEL=ollama/qwen3:8b
 - Moonshot officially documents Kimi as an OpenAI-compatible API, with `https://api.moonshot.ai/v1` as the base URL: <https://platform.kimi.ai/docs/guide/kimi-k2-6-quickstart>
 - LiteLLM officially requires the `openai/` prefix for OpenAI-compatible model routing: <https://docs.litellm.ai/docs/providers/openai_compatible>
 - Moonshot's compatibility docs distinguish two fixed values: **thinking mode must use `1.0`, while non-thinking mode must use `0.6`**; other values are rejected by the API: <https://platform.moonshot.ai/docs/guide/compatibility#parameters-differences-in-request-body>
-- The current runtime dependency window in this repository is `litellm>=1.80.10,<1.82.7` (see `requirements.txt`); this compatibility fix is regression-covered in that range across the main analyzer, market review, direct Agent LiteLLM calls, and the system-settings channel connectivity test path.
+- The current runtime dependency constraint in this repository is `litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0` (see `requirements.txt`); this compatibility fix is regression-covered under that constraint across the main analyzer, market review, direct Agent LiteLLM calls, and the system-settings channel connectivity test path.
 - This repository therefore normalizes `kimi-k2.6` and `kimi-k2.6-*` right before dispatch based on the **actual request mode**: default / thinking requests use `temperature=1.0`; if your LiteLLM YAML route alias explicitly sets `litellm_params.extra_body.thinking.type: disabled` (or an equivalent non-thinking override), it automatically switches to `temperature=0.6`. Your saved `LLM_TEMPERATURE` value in `.env` or the Web settings is not rewritten.
 - `SystemConfigService` only updates keys that you actually submit when saving from the Web settings page or importing a desktop `.env`; switching to Kimi does not silently clear, migrate, or rewrite an existing `LLM_TEMPERATURE`. The temporary `1.0/0.6` used for Kimi channel tests is request-scoped and is not persisted back into the config file.
 - Non-Kimi primary models, non-Kimi fallbacks, and any request after switching away from Kimi still use your configured temperature. Existing configs do not need migration; changing the model restores the original behavior automatically.
@@ -214,7 +218,7 @@ This layer maps directly to the underlying LiteLLM routing capabilities, includi
    ```env
    LITELLM_CONFIG=./litellm_config.yaml
    ```
-2. Create a `litellm_config.yaml` in the project root directory (you can refer to `litellm_config.example.yaml`).
+2. Create a `litellm_config.yaml` in the project root directory (you can refer to `docs/examples/litellm_config.example.yaml`).
 
 Example `litellm_config.yaml`:
 ```yaml
@@ -269,8 +273,8 @@ VISION_PROVIDER_PRIORITY=gemini,anthropic,openai
 
 Afraid you got the config wrong? Type the following commands in your terminal to diagnose:
 
-- `python test_env.py --config`: Only verifies if the logic in your `.env` is structurally correct. (Provides instant results, no network calls, strictly checks for syntax omissions).
-- `python test_env.py --llm`: Sends a real greeting to the LLM to test the actual endpoint. This thoroughly verifies if your **network is working** and if your **account has sufficient balance**.
+- `python scripts/check_env.py --config`: Only verifies if the logic in your `.env` is structurally correct. (Provides instant results, no network calls, strictly checks for syntax omissions).
+- `python scripts/check_env.py --llm`: Sends a real greeting to the LLM to test the actual endpoint. This thoroughly verifies if your **network is working** and if your **account has sufficient balance**.
 
 ### Common Pitfalls
 
