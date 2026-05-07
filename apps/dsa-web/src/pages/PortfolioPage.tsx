@@ -30,6 +30,8 @@ const FALLBACK_BROKERS: PortfolioImportBrokerItem[] = [
   { broker: 'huatai', aliases: [], displayName: '华泰' },
   { broker: 'citic', aliases: ['zhongxin'], displayName: '中信' },
   { broker: 'cmb', aliases: ['cmbchina', 'zhaoshang'], displayName: '招商' },
+  // [新增] 东吴证券 | 2026-05-07
+  { broker: 'dongwu', aliases: ['soochow', 'dwzq'], displayName: '东吴' },
 ];
 
 type AccountOption = 'all' | number;
@@ -128,6 +130,8 @@ function formatBrokerLabel(value: string, displayName?: string): string {
   if (value === 'huatai') return 'huatai（华泰）';
   if (value === 'citic') return 'citic（中信）';
   if (value === 'cmb') return 'cmb（招商）';
+  // [新增] 东吴证券标签 | 2026-05-07
+  if (value === 'dongwu') return 'dongwu（东吴）';
   return value;
 }
 
@@ -322,7 +326,7 @@ const PortfolioPage: React.FC = () => {
       const brokerItems = response.brokers || [];
       if (brokerItems.length === 0) {
         setBrokers(FALLBACK_BROKERS);
-        setBrokerLoadWarning('券商列表接口返回为空，已回退为内置券商列表（华泰/中信/招商）。');
+        setBrokerLoadWarning('券商列表接口返回为空，已回退为内置券商列表（华泰/中信/招商/东吴）。');
         if (!FALLBACK_BROKERS.some((item) => item.broker === selectedBroker)) {
           setSelectedBroker(FALLBACK_BROKERS[0].broker);
         }
@@ -335,7 +339,7 @@ const PortfolioPage: React.FC = () => {
       }
     } catch {
       setBrokers(FALLBACK_BROKERS);
-      setBrokerLoadWarning('券商列表接口不可用，已回退为内置券商列表（华泰/中信/招商）。');
+      setBrokerLoadWarning('券商列表接口不可用，已回退为内置券商列表（华泰/中信/招商/东吴）。');
       if (!FALLBACK_BROKERS.some((item) => item.broker === selectedBroker)) {
         setSelectedBroker(FALLBACK_BROKERS[0].broker);
       }
@@ -995,10 +999,11 @@ const PortfolioPage: React.FC = () => {
             </select>
             {accountForm.accountType === 'margin' && (
               <>
+                {/* [修复] step 从 0.01 改为 0.0001，支持输入4位小数利率（如 0.0520） | 2026-05-07 */}
                 <input
                   className={PORTFOLIO_INPUT_CLASS}
                   type="number"
-                  step="0.01"
+                  step="0.0001"
                   min="0"
                   max="1"
                   placeholder="融资年利率（如 0.068 表示 6.8%）"
@@ -1008,7 +1013,7 @@ const PortfolioPage: React.FC = () => {
                 <input
                   className={PORTFOLIO_INPUT_CLASS}
                   type="number"
-                  step="0.01"
+                  step="0.0001"
                   min="0"
                   max="1"
                   placeholder="融券年利率（如 0.08 表示 8%）"
@@ -1018,7 +1023,7 @@ const PortfolioPage: React.FC = () => {
                 <input
                   className={PORTFOLIO_INPUT_CLASS}
                   type="number"
-                  step="0.01"
+                  step="0.0001"
                   min="0"
                   max="1"
                   placeholder="保证金比例（如 0.5 表示 50%）"

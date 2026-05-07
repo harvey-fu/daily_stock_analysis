@@ -73,6 +73,20 @@ DEFAULT_PARSER_SPECS: Tuple[CsvParserSpec, ...] = (
             "trade_uid": ("流水号", "成交编号", "成交序号"),
         },
     ),
+    # [新增] 东吴证券 CSV 解析器 | 2026-05-07
+    CsvParserSpec(
+        broker="dongwu",
+        aliases=("soochow", "dwzq"),
+        display_name="东吴",
+        column_hints={
+            "trade_date": ("成交日期", "发生日期", "日期"),
+            "symbol": ("证券代码", "股票代码", "代码"),
+            "side": ("买卖标志", "买卖方向", "操作", "交易类别"),
+            "quantity": ("成交数量", "数量", "成交股数"),
+            "price": ("成交价格", "成交均价", "成交价", "价格"),
+            "trade_uid": ("成交编号", "委托编号", "合同编号"),
+        },
+    ),
 )
 
 # 2026-05-06: 融资融券 CSV 解析器规范
@@ -120,6 +134,22 @@ MARGIN_PARSER_SPECS: Tuple[CsvParserSpec, ...] = (
             "interest_rate": ("利率",),
             "fee": ("手续费",),
             "interest": ("利息",),
+        },
+    ),
+    # [新增] 东吴证券融资融券 CSV 解析器 | 2026-05-07
+    CsvParserSpec(
+        broker="dongwu_margin",
+        aliases=("soochow_margin", "dwzq_margin"),
+        display_name="东吴融资融券",
+        column_hints={
+            "trade_date": ("成交日期", "交易日期", "日期"),
+            "symbol": ("证券代码", "股票代码", "代码"),
+            "side": ("交易类别", "业务类型", "交易类型"),
+            "quantity": ("成交数量", "数量", "成交股数"),
+            "price": ("成交价格", "成交价", "价格"),
+            "interest_rate": ("利率", "年利率", "融资利率", "融券利率"),
+            "fee": ("手续费", "佣金", "交易费"),
+            "interest": ("利息", "融资利息", "融券利息"),
         },
     ),
 )

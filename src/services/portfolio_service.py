@@ -1688,12 +1688,14 @@ class PortfolioService:
         # 计算本金
         principal = quantity * price
 
-        # 记录交易
-        trade = self.repo.record_trade(
+        # [修复] 融资融券方向映射为交易表标准方向 | 2026-05-07
+        trade_side = 'buy' if side_norm in ('margin_buy', 'short_cover') else 'sell'
+        trade = self.repo.add_trade(
             account_id=account_id,
+            trade_uid=None,
             symbol=symbol_norm,
             trade_date=date.today(),
-            side=side_norm,
+            side=trade_side,
             quantity=quantity,
             price=price,
             fee=fee,
@@ -1706,7 +1708,7 @@ class PortfolioService:
         # 记录融资融券明细
         margin_detail = self.repo.insert_margin_detail(
             account_id=account_id,
-            trade_id=trade['id'],
+            trade_id=trade.id,
             symbol=symbol_norm,
             market=market_norm,
             margin_type=margin_type,
@@ -1718,7 +1720,7 @@ class PortfolioService:
         )
 
         return {
-            'trade': trade,
+            'trade': {'id': trade.id},
             'margin_detail': self._margin_detail_to_dict(margin_detail),
         }
 

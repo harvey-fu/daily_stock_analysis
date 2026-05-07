@@ -1,7 +1,7 @@
 # 本地代码修改记录
 
 > 本文件记录所有本地代码修改项，方便与上游合并时对比。
-> 最后更新：2026-05-06
+> 最后更新：2026-05-07
 
 ---
 
@@ -326,6 +326,186 @@ const [marginForm, setMarginForm] = useState({
 
 ---
 
+## 修改四：券商 CSV 导入支持东吴证券
+
+**修改时间**：2026-05-07
+
+**修改目的**：为券商 CSV 导入功能添加东吴证券支持，包括普通交易和融资融券 CSV 格式
+
+**涉及文件**：
+
+### 1. `src/services/portfolio_import_service.py` — 解析器注册
+
+**新增普通交易解析器**（`DEFAULT_PARSER_SPECS`）：
+```diff
++    # [新增] 东吴证券 CSV 解析器 | 2026-05-07
++    CsvParserSpec(
++        broker="dongwu",
++        aliases=("soochow", "dwzq"),
++        display_name="东吴",
++        column_hints={
++            "trade_date": ("成交日期", "发生日期", "日期"),
++            "symbol": ("证券代码", "股票代码", "代码"),
++            "side": ("买卖标志", "买卖方向", "操作", "交易类别"),
++            "quantity": ("成交数量", "数量", "成交股数"),
++            "price": ("成交价格", "成交均价", "成交价", "价格"),
++            "trade_uid": ("成交编号", "委托编号", "合同编号"),
++        },
++    ),
+```
+
+**新增融资融券解析器**（`MARGIN_PARSER_SPECS`）：
+```diff
++    # [新增] 东吴证券融资融券 CSV 解析器 | 2026-05-07
++    CsvParserSpec(
++        broker="dongwu_margin",
++        aliases=("soochow_margin", "dwzq_margin"),
++        display_name="东吴融资融券",
++        column_hints={
++            "trade_date": ("成交日期", "交易日期", "日期"),
++            "symbol": ("证券代码", "股票代码", "代码"),
++            "side": ("交易类别", "业务类型", "交易类型"),
++            "quantity": ("成交数量", "数量", "成交股数"),
++            "price": ("成交价格", "成交价", "价格"),
++            "interest_rate": ("利率", "年利率", "融资利率", "融券利率"),
++            "fee": ("手续费", "佣金", "交易费"),
++            "interest": ("利息", "融资利息", "融券利息"),
++        },
++    ),
+```
+
+### 2. `apps/dsa-web/src/pages/PortfolioPage.tsx` — 前端页面
+
+**FALLBACK_BROKERS 新增东吴**：
+```diff
+  const FALLBACK_BROKERS: PortfolioImportBrokerItem[] = [
+    { broker: 'huatai', aliases: [], displayName: '华泰' },
+    { broker: 'citic', aliases: ['zhongxin'], displayName: '中信' },
+    { broker: 'cmb', aliases: ['cmbchina', 'zhaoshang'], displayName: '招商' },
++   // [新增] 东吴证券 | 2026-05-07
++   { broker: 'dongwu', aliases: ['soochow', 'dwzq'], displayName: '东吴' },
+  ];
+```
+
+**formatBrokerLabel 新增东吴标签**：
+```diff
+  if (value === 'huatai') return 'huatai（华泰）';
+  if (value === 'citic') return 'citic（中信）';
+  if (value === 'cmb') return 'cmb（招商）';
++ // [新增] 东吴证券标签 | 2026-05-07
++ if (value === 'dongwu') return 'dongwu（东吴）';
+```
+
+### 3. `api/v1/endpoints/portfolio.py` — API 端点
+
+**更新 broker 参数描述**：
+```diff
+-    broker: str = Form(..., description="Broker id: huatai/citic/cmb"),
++    broker: str = Form(..., description="Broker id: huatai/citic/cmb/dongwu"),
+```
+
+---
+
+## 修改五：融资利率输入精度修复
+
+**修改时间**：2026-05-07
+
+**修改目的**：修复账户创建表单中融资利率、融券利率、保证金比例输入框无法输入4位小数的问题（如 0.0520、0.0835）
+
+**问题根因**：HTML `<input type="number">` 的 `step` 属性设置为 `"0.01"`，浏览器限制只能输入2位小数
+
+**涉及文件**：
+
+### 1. `apps/dsa-web/src/pages/PortfolioPage.tsx` — 前端页面
+
+**修改输入框 step 属性**：
+```diff
+  {accountForm.accountType === 'margin' && (
+    <>
++     {/* [修复] step 从 0.01 改为 0.0001，支持输入4位小数利率（如 0.0520） | 2026-05-07 */}
+      <input
+        className={PORTFOLIO_INPUT_CLASS}
+        type="number"
+-       step="0.01"
++       step="0.0001"
+        min="0"
+        max="1"
+        placeholder="融资年利率（如 0.068 表示 6.8%）"
+        ...
+      />
+      <input
+        className={PORTFOLIO_INPUT_CLASS}
+        type="number"
+-       step="0.01"
++       step="0.0001"
+        min="0"
+        max="1"
+        placeholder="融券年利率（如 0.08 表示 8%）"
+        ...
+      />
+      <input
+        className={PORTFOLIO_INPUT_CLASS}
+        type="number"
+-       step="0.01"
++       step="0.0001"
+        min="0"
+        max="1"
+        placeholder="保证金比例（如 0.5 表示 50%）"
+        ...
+      />
+```
+
+---
+
+## 修改六：融资融券交易录入方法调用修复
+
+**修改时间**：2026-05-07
+
+**修改目的**：修复融资买入提交时报错 `'PortfolioRepository' object has no attribute 'record_trade'` 和 `Unsupported trade side: margin_buy`
+
+**问题根因**：
+1. `portfolio_service.py` 的 `record_margin_trade()` 调用了不存在的 `self.repo.record_trade()`，仓库实际方法名为 `add_trade()`
+2. 融资融券方向（如 `margin_buy`）直接传入交易表，但交易表只支持 `buy`/`sell`
+
+**涉及文件**：
+
+### 1. `src/services/portfolio_service.py` — 服务层
+
+**修改方法调用、方向映射和返回值**：
+```diff
++        # [修复] 融资融券方向映射为交易表标准方向 | 2026-05-07
++        trade_side = 'buy' if side_norm in ('margin_buy', 'short_cover') else 'sell'
+-        trade = self.repo.record_trade(
++        trade = self.repo.add_trade(
+             account_id=account_id,
++            trade_uid=None,
+             symbol=symbol_norm,
+             trade_date=date.today(),
+-            side=side_norm,
++            side=trade_side,
+             ...
+         )
+         margin_detail = self.repo.insert_margin_detail(
+             account_id=account_id,
+-            trade_id=trade['id'],
++            trade_id=trade.id,
+             ...
+         )
+         return {
+-            'trade': trade,
++            'trade': {'id': trade.id},
+             'margin_detail': self._margin_detail_to_dict(margin_detail),
+         }
+```
+
+**方向映射规则**：
+- `margin_buy`（融资买入）→ `buy`
+- `short_sell`（融券卖出）→ `sell`
+- `margin_repay`（卖券还款）→ `sell`
+- `short_cover`（买券还券）→ `buy`
+
+---
+
 ## 修改汇总
 
 | 序号 | 文件 | 修改类型 | 日期 |
@@ -345,6 +525,11 @@ const [marginForm, setMarginForm] = useState({
 | 13 | `apps/dsa-web/src/types/portfolio.ts` | 新增类型 | 2026-05-06 |
 | 14 | `apps/dsa-web/src/api/portfolio.ts` | 新增方法 | 2026-05-06 |
 | 15 | `apps/dsa-web/src/pages/PortfolioPage.tsx` | 新增 UI 组件 | 2026-05-06 |
+| 16 | `src/services/portfolio_import_service.py` | 新增东吴证券解析器 | 2026-05-07 |
+| 17 | `apps/dsa-web/src/pages/PortfolioPage.tsx` | 新增东吴证券前端支持 | 2026-05-07 |
+| 18 | `api/v1/endpoints/portfolio.py` | 更新 broker 参数描述 | 2026-05-07 |
+| 19 | `apps/dsa-web/src/pages/PortfolioPage.tsx` | 修复利率输入精度 | 2026-05-07 |
+| 20 | `src/services/portfolio_service.py` | 修复融资融券交易方法调用 | 2026-05-07 |
 
 > `.env` 文件不纳入 git 跟踪，拉取上游更新时不会冲突。
 > 其他修改文件需在 git pull 后检查是否有冲突。
