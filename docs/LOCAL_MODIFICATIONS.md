@@ -531,5 +531,26 @@ const [marginForm, setMarginForm] = useState({
 | 19 | `apps/dsa-web/src/pages/PortfolioPage.tsx` | 修复利率输入精度 | 2026-05-07 |
 | 20 | `src/services/portfolio_service.py` | 修复融资融券交易方法调用 | 2026-05-07 |
 
+---
+
+## 修改七：LLM 模型名称修复（.env）
+
+**修改时间**：2026-05-08
+
+**修改目的**：修复多策略分析报错 `deepseek-v4-pro[1m]` 模型名无效
+
+**问题根因**：`.env` 中 `LLM_DEEPSEEK_MODELS` 和 `LITELLM_MODEL` 的值包含了终端转义字符 `[1m]`（ANSI 粗体标记），导致传给 DeepSeek API 的模型名为 `deepseek-v4-pro[1m]` 而非 `deepseek-v4-pro`
+
+**涉及文件**：
+
+### 1. `.env` — 环境变量（不纳入 git）
+
+```diff
+-LLM_DEEPSEEK_MODELS=deepseek-v4-pro[1m]
+-LITELLM_MODEL=deepseek/deepseek-v4-pro[1m]
++LLM_DEEPSEEK_MODELS=deepseek-v4-pro
++LITELLM_MODEL=deepseek/deepseek-v4-pro
+```
+
 > `.env` 文件不纳入 git 跟踪，拉取上游更新时不会冲突。
 > 其他修改文件需在 git pull 后检查是否有冲突。
