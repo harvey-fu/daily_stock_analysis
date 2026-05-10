@@ -42,7 +42,7 @@ class _TrackingNotifier:
         )
         self.send = MagicMock(side_effect=self._send)
 
-    def _send(self, content, email_stock_codes=None):
+    def _send(self, content, email_stock_codes=None, route_type=None):
         with self._lock:
             self._inflight += 1
             self.max_inflight = max(self.max_inflight, self._inflight)
@@ -142,6 +142,7 @@ class TestPipelineSingleStockNotify(unittest.TestCase):
         pipeline.notifier.send.assert_called_once_with(
             "brief:600519",
             email_stock_codes=["600519"],
+            route_type="report",
         )
 
     def test_process_single_stock_direct_path_does_not_notify_when_failed(self):

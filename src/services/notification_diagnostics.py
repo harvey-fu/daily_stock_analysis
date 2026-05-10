@@ -8,6 +8,11 @@ from typing import List, Literal, Optional, Sequence, Tuple
 
 from src.config import Config
 from src.notification import ChannelDetector, NotificationChannel, NotificationService
+from src.notification_routing import (
+    NOTIFICATION_ROUTE_CONFIGS,
+    ROUTABLE_NOTIFICATION_CHANNELS,
+    split_notification_route_channels,
+)
 
 KeyTier = Literal["minimal", "advanced"]
 IssueSeverity = Literal["error", "warning", "info"]
@@ -174,6 +179,14 @@ KEY_SPECS: Tuple[NotificationKeySpec, ...] = tuple(
     NotificationKeySpec(key=key, tier="advanced", description="Optional channel behavior or security setting.", channel=spec.channel)
     for spec in CHANNEL_SPECS
     for key in spec.advanced_keys
+) + tuple(
+    NotificationKeySpec(
+        key=route["env_key"],
+        tier="advanced",
+        description=route["description"],
+        channel="routing",
+    )
+    for route in NOTIFICATION_ROUTE_CONFIGS.values()
 )
 
 P0_ACTIONS_ENV_KEYS: Tuple[str, ...] = (
@@ -182,6 +195,10 @@ P0_ACTIONS_ENV_KEYS: Tuple[str, ...] = (
     "FEISHU_WEBHOOK_SECRET",
     "FEISHU_WEBHOOK_KEYWORD",
     "PUSHPLUS_TOPIC",
+)
+
+P3_ROUTE_ENV_KEYS: Tuple[str, ...] = tuple(
+    route["env_key"] for route in NOTIFICATION_ROUTE_CONFIGS.values()
 )
 
 
@@ -257,7 +274,7 @@ def run_notification_diagnostics(config: Config) -> NotificationDiagnosticResult
         _issue(
             "info",
             "phase_scope",
-            "P0 只做配置基线和只读诊断；路由、降噪和 Web 一键测试留给后续 Phase。",
+            "通知诊断会检查渠道基线、只读诊断、Web 测试和 P3 路由配置；降噪和长尾渠道留给后续 Phase。",
         ),
     ]
 
@@ -359,6 +376,40 @@ def run_notification_diagnostics(config: Config) -> NotificationDiagnosticResult
                 key="ASTRBOT_URL",
             )
         )
+
+    configured_set = set(configured)
+    for route_type, route_config in NOTIFICATION_ROUTE_CONFIGS.items():
+        route_channels = getattr(config, route_config["config_attr"], []) or []
+        if not route_channels:
+            continue
+
+        valid_channels, invalid_channels = split_notification_route_channels(route_channels)
+        if invalid_channels:
+            errors.append(
+                _issue(
+                    "error",
+                    "invalid_route_channel",
+                    (
+                        f"{route_config['env_key']} 包含未知通知渠道: {', '.join(invalid_channels)}；"
+                        f"允许值: {', '.join(ROUTABLE_NOTIFICATION_CHANNELS)}。"
+                    ),
+                    key=route_config["env_key"],
+                )
+            )
+
+        disabled_channels = [channel for channel in valid_channels if channel not in configured_set]
+        if disabled_channels:
+            warnings.append(
+                _issue(
+                    "warning",
+                    "route_channel_not_configured",
+                    (
+                        f"{route_config['env_key']} 路由 {route_type} 指向未启用渠道: "
+                        f"{', '.join(disabled_channels)}；这些渠道不会收到该类型通知。"
+                    ),
+                    key=route_config["env_key"],
+                )
+            )
 
     return NotificationDiagnosticResult(
         configured_channels=configured,

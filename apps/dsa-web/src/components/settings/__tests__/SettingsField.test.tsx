@@ -82,4 +82,95 @@ describe('SettingsField', () => {
     expect(screen.getAllByRole('button', { name: '显示内容' })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: '删除' })).toHaveLength(2);
   });
+
+  it('renders localized custom webhook body template guidance', () => {
+    const onChange = vi.fn();
+
+    render(
+      <SettingsField
+        item={{
+          key: 'CUSTOM_WEBHOOK_BODY_TEMPLATE',
+          value: '',
+          rawValueExists: false,
+          isMasked: false,
+          schema: {
+            key: 'CUSTOM_WEBHOOK_BODY_TEMPLATE',
+            category: 'notification',
+            dataType: 'string',
+            uiControl: 'textarea',
+            isSensitive: false,
+            isRequired: false,
+            isEditable: true,
+            options: [],
+            validation: {},
+            displayOrder: 52,
+          },
+        }}
+        value=""
+        onChange={onChange}
+      />
+    );
+
+    expect(screen.getByLabelText('自定义 Webhook Body 模板')).toBeInTheDocument();
+    expect(screen.getByText(/会先于 Bark、Slack、Discord 等自动 payload 生效/)).toBeInTheDocument();
+    expect(screen.getByText(/裸 \$content \/ \$title 不做 JSON 转义/)).toBeInTheDocument();
+  });
+
+  it('opens detailed field help when help metadata is available', () => {
+    render(
+      <SettingsField
+        item={{
+          key: 'STOCK_LIST',
+          value: '600519,300750',
+          rawValueExists: true,
+          isMasked: false,
+          schema: {
+            key: 'STOCK_LIST',
+            category: 'base',
+            dataType: 'array',
+            uiControl: 'textarea',
+            isSensitive: false,
+            isRequired: false,
+            isEditable: true,
+            options: [],
+            validation: {},
+            displayOrder: 1,
+            helpKey: 'settings.base.STOCK_LIST',
+            examples: ['STOCK_LIST=600519,300750,002594'],
+            docs: [
+              {
+                label: '完整指南',
+                href: 'https://example.com/full-guide',
+              },
+            ],
+            warningCodes: [],
+          },
+        }}
+        value="600519,300750"
+        onChange={() => undefined}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '查看 自选股列表 配置说明' }));
+
+    expect(screen.getByRole('dialog', { name: '自选股列表' })).toBeInTheDocument();
+    expect(screen.getByText('STOCK_LIST=600519,300750,002594')).toBeInTheDocument();
+    const docLink = screen.getByRole('link', { name: /完整指南/ });
+    expect(docLink).toHaveAttribute('href', 'https://example.com/full-guide');
+
+    const closeButtons = screen.getAllByRole('button', { name: '关闭配置说明' });
+    expect(closeButtons[0].tabIndex).toBe(-1);
+    const closeButton = closeButtons.find((button) => button.tabIndex !== -1);
+    expect(closeButton).toBeDefined();
+
+    closeButton?.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(docLink).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(closeButton).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '自选股列表' })).not.toBeInTheDocument();
+  });
 });

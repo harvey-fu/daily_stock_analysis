@@ -940,6 +940,92 @@ describe('LLMChannelEditor', () => {
 
     expect(await screen.findByText(/聊天调用 · 鉴权失败：LLM authentication failed/i)).toBeInTheDocument();
     expect(screen.getByText(/请检查 API Key 是否正确/i)).toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
+  });
+
+  it('shows tested model and model-availability hints when a model is disabled', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM channel test failed',
+      error: 'litellm.APIError: APIError: OpenAIException - Model disabled.',
+      errorCode: 'model_not_found',
+      stage: 'chat_completion',
+      retryable: false,
+      details: { reason: 'model_access_denied', model: 'openai/deepseek-ai/DeepSeek-V3' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/deepseek-ai/DeepSeek-V3',
+      latencyMs: null,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'siliconflow' },
+          { key: 'LLM_SILICONFLOW_PROTOCOL', value: 'openai' },
+          { key: 'LLM_SILICONFLOW_BASE_URL', value: 'https://api.siliconflow.cn/v1' },
+          { key: 'LLM_SILICONFLOW_ENABLED', value: 'true' },
+          { key: 'LLM_SILICONFLOW_API_KEY', value: 'secret-key' },
+          { key: 'LLM_SILICONFLOW_MODELS', value: 'deepseek-ai/DeepSeek-V3,Qwen/Qwen3-Coder' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /SiliconFlow/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    expect(await screen.findByText(/聊天调用 · 模型不可用：LLM channel test failed/i)).toBeInTheDocument();
+    expect(screen.getByText(/本次测试模型：openai\/deepseek-ai\/DeepSeek-V3/i)).toBeInTheDocument();
+    expect(screen.getByText(/基础连接测试默认使用模型列表首项：deepseek-ai\/DeepSeek-V3/i)).toBeInTheDocument();
+    expect(screen.getByText(/基础连接测试默认只测试模型列表中的第一个模型/i)).toBeInTheDocument();
+    expect(screen.getByText(/调整模型顺序或移除不可用模型/i)).toBeInTheDocument();
+    expect(screen.getByText(/模型是否已开通、账号是否可见/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Base URL、代理、TLS/i)).not.toBeInTheDocument();
+    expect(testLLMChannel).toHaveBeenCalledWith(expect.objectContaining({
+      models: ['deepseek-ai/DeepSeek-V3', 'Qwen/Qwen3-Coder'],
+    }));
+  });
+
+  it('shows provider blocked troubleshooting without network or model-list hints', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM request was blocked by provider or gateway policy',
+      error: 'litellm.APIError: APIError: OpenAIException - Your request was blocked.',
+      errorCode: 'request_blocked',
+      stage: 'chat_completion',
+      retryable: false,
+      details: { reason: 'provider_blocked', model: 'openai/gpt-5.5' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-5.5',
+      latencyMs: null,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[
+          { key: 'LLM_CHANNELS', value: 'proxy' },
+          { key: 'LLM_PROXY_PROTOCOL', value: 'openai' },
+          { key: 'LLM_PROXY_BASE_URL', value: 'https://gateway.example.com/v1' },
+          { key: 'LLM_PROXY_ENABLED', value: 'true' },
+          { key: 'LLM_PROXY_API_KEY', value: 'secret-key' },
+          { key: 'LLM_PROXY_MODELS', value: 'gpt-5.5,gpt-4o-mini' },
+        ]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /proxy/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    expect(await screen.findByText(/聊天调用 · 请求被拦截/i)).toBeInTheDocument();
+    expect(screen.getByText(/本次测试模型：openai\/gpt-5\.5/i)).toBeInTheDocument();
+    expect(screen.getByText(/账号风控、地域限制、模型权限/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Base URL、代理、TLS/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
   });
 
   it('shows focused quota exceeded troubleshooting hints', async () => {
@@ -969,6 +1055,37 @@ describe('LLMChannelEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
 
     expect(await screen.findByText(/服务商返回配额已耗尽/i)).toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show model-list action hints for network failures', async () => {
+    testLLMChannel.mockResolvedValue({
+      success: false,
+      message: 'LLM request failed before a valid response was returned',
+      error: 'DNS lookup failed',
+      errorCode: 'network_error',
+      stage: 'chat_completion',
+      retryable: true,
+      details: { reason: 'dns_error' },
+      resolvedProtocol: 'openai',
+      resolvedModel: 'openai/gpt-4o-mini',
+      latencyMs: null,
+    });
+
+    render(
+      <LLMChannelEditor
+        items={[{ key: 'LLM_CHANNELS', value: 'openai' }, { key: 'LLM_OPENAI_PROTOCOL', value: 'openai' }, { key: 'LLM_OPENAI_BASE_URL', value: 'https://api.openai.com/v1' }, { key: 'LLM_OPENAI_ENABLED', value: 'true' }, { key: 'LLM_OPENAI_API_KEY', value: 'secret-key' }, { key: 'LLM_OPENAI_MODELS', value: 'gpt-4o-mini' }]}
+        configVersion="v1"
+        maskToken="******"
+        onSaved={() => {}}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /OpenAI 官方/i }));
+    fireEvent.click(screen.getByRole('button', { name: '测试连接' }));
+
+    expect(await screen.findByText(/域名解析失败/i)).toBeInTheDocument();
+    expect(screen.queryByText(/调整模型顺序或移除不可用模型/i)).not.toBeInTheDocument();
   });
 
   it('does not request runtime capabilities during the basic connection test', async () => {

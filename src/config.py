@@ -24,6 +24,7 @@ from src.report_language import (
     is_supported_report_language_value,
     normalize_report_language,
 )
+from src.notification_routing import parse_notification_route_channels
 
 logger = logging.getLogger(__name__)
 
@@ -749,6 +750,11 @@ class Config:
     astrbot_token: Optional[str] = None
     astrbot_url: Optional[str] = None
 
+    # 通知路由策略（Issue #1200 P3）：留空表示该类型使用全部已配置渠道
+    notification_report_channels: List[str] = field(default_factory=list)
+    notification_alert_channels: List[str] = field(default_factory=list)
+    notification_system_error_channels: List[str] = field(default_factory=list)
+
     # 单股推送模式：每分析完一只股票立即推送，而不是汇总后推送
     single_stock_notify: bool = False
 
@@ -1461,6 +1467,15 @@ class Config:
             slack_channel_id=os.getenv('SLACK_CHANNEL_ID'),
             astrbot_url=os.getenv('ASTRBOT_URL'),
             astrbot_token=os.getenv('ASTRBOT_TOKEN'),
+            notification_report_channels=parse_notification_route_channels(
+                os.getenv('NOTIFICATION_REPORT_CHANNELS')
+            ),
+            notification_alert_channels=parse_notification_route_channels(
+                os.getenv('NOTIFICATION_ALERT_CHANNELS')
+            ),
+            notification_system_error_channels=parse_notification_route_channels(
+                os.getenv('NOTIFICATION_SYSTEM_ERROR_CHANNELS')
+            ),
             single_stock_notify=os.getenv('SINGLE_STOCK_NOTIFY', 'false').lower() == 'true',
             report_type=cls._parse_report_type(os.getenv('REPORT_TYPE', 'simple')),
             report_language=cls._parse_report_language(report_language_raw),

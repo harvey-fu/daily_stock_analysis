@@ -320,6 +320,11 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
 
+          # 通知路由策略（留空时保持全部已配置渠道）
+          NOTIFICATION_REPORT_CHANNELS: ${{ vars.NOTIFICATION_REPORT_CHANNELS || secrets.NOTIFICATION_REPORT_CHANNELS }}
+          NOTIFICATION_ALERT_CHANNELS: ${{ vars.NOTIFICATION_ALERT_CHANNELS || secrets.NOTIFICATION_ALERT_CHANNELS }}
+          NOTIFICATION_SYSTEM_ERROR_CHANNELS: ${{ vars.NOTIFICATION_SYSTEM_ERROR_CHANNELS || secrets.NOTIFICATION_SYSTEM_ERROR_CHANNELS }}
+
           # ==========================================
           # 自选股配置
           # ==========================================

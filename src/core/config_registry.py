@@ -11,8 +11,9 @@ from copy import deepcopy
 from typing import Any, Dict, List, Optional
 
 from src.config import AGENT_MAX_STEPS_DEFAULT
+from src.notification_routing import ROUTABLE_NOTIFICATION_CHANNELS
 
-SCHEMA_VERSION = "2026-03-29"
+SCHEMA_VERSION = "2026-05-10"
 
 _CATEGORY_DEFINITIONS: List[Dict[str, Any]] = [
     {
@@ -79,6 +80,22 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {"min_items": 1},
         "display_order": 10,
+        "help_key": "settings.base.STOCK_LIST",
+        "examples": [
+            "STOCK_LIST=600519,300750,002594",
+            "STOCK_LIST=600519,hk00700,AAPL",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：环境变量完整列表",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#环境变量完整列表",
+            },
+            {
+                "label": "Tushare 股票列表指南",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/TUSHARE_STOCK_LIST_GUIDE.md",
+            },
+        ],
+        "warning_codes": [],
     },
     # ------------------------------------------------------------------
     # AI Model – LiteLLM unified config
@@ -96,6 +113,23 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {},
         "display_order": 1,
+        "help_key": "settings.ai_model.LITELLM_MODEL",
+        "examples": [
+            "LITELLM_MODEL=deepseek/deepseek-v4-flash",
+            "LITELLM_MODEL=gemini/gemini-3.1-pro-preview",
+            "LITELLM_MODEL=ollama/qwen3:8b",
+        ],
+        "docs": [
+            {
+                "label": "LLM 配置指南",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/LLM_CONFIG_GUIDE.md",
+            },
+            {
+                "label": "完整指南：AI 模型配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#ai-模型配置",
+            },
+        ],
+        "warning_codes": ["provider_prefix_required"],
     },
     "AGENT_LITELLM_MODEL": {
         "title": "Agent Primary Model",
@@ -155,6 +189,24 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": [],
         "validation": {},
         "display_order": 4,
+        "help_key": "settings.ai_model.LLM_CHANNELS",
+        "examples": [
+            "LLM_CHANNELS=deepseek,aihubmix",
+            "LLM_DEEPSEEK_BASE_URL=https://api.deepseek.com",
+            "LLM_DEEPSEEK_API_KEY=sk-xxxx",
+            "LLM_DEEPSEEK_MODELS=deepseek-v4-flash,deepseek-v4-pro",
+        ],
+        "docs": [
+            {
+                "label": "LLM 配置指南：渠道模式",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/LLM_CONFIG_GUIDE.md#方式二渠道channels模式配置适合进阶多模型",
+            },
+            {
+                "label": "LLM 服务商配置速查",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/llm-providers.md",
+            },
+        ],
+        "warning_codes": ["channels_override_legacy_keys"],
     },
     "LLM_TEMPERATURE": {
         "title": "Temperature",
@@ -853,8 +905,10 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "CUSTOM_WEBHOOK_BODY_TEMPLATE": {
         "title": "Custom Webhook Body Template",
         "description": (
-            "Optional JSON body template for custom webhooks. Supports $content_json, "
-            "$content, $title_json, and $title placeholders."
+            "Optional global JSON body template for custom webhooks. It is rendered before "
+            "URL auto-detected payloads such as Bark, Slack, or Discord, and must render to a "
+            "JSON object. Prefer $content_json and $title_json; raw $content and $title are "
+            "not JSON-escaped and can make the template invalid."
         ),
         "category": "notification",
         "data_type": "string",
@@ -914,6 +968,23 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "allowed_schemes": ["http", "https"],
         },
         "display_order": 12,
+        "help_key": "settings.notification.FEISHU_WEBHOOK_URL",
+        "examples": [
+            "FEISHU_WEBHOOK_URL=https://open.feishu.cn/open-apis/bot/v2/hook/your_hook_token",
+            "FEISHU_WEBHOOK_SECRET=your_feishu_webhook_secret",
+            "FEISHU_WEBHOOK_KEYWORD=股票日报",
+        ],
+        "docs": [
+            {
+                "label": "完整指南：飞书通知配置",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#飞书",
+            },
+            {
+                "label": "飞书机器人配置专题",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/bot/feishu-bot-config.md",
+            },
+        ],
+        "warning_codes": ["feishu_webhook_not_app_secret"],
     },
     "FEISHU_WEBHOOK_SECRET": {
         "title": "Feishu Webhook Secret",
@@ -1387,6 +1458,48 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "validation": {},
         "display_order": 61,
     },
+    "NOTIFICATION_REPORT_CHANNELS": {
+        "title": "Report Notification Channels",
+        "description": "Comma-separated route for report notifications. Empty keeps all configured channels.",
+        "category": "notification",
+        "data_type": "array",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "",
+        "options": [{"label": channel, "value": channel} for channel in ROUTABLE_NOTIFICATION_CHANNELS],
+        "validation": {"allowed_values": list(ROUTABLE_NOTIFICATION_CHANNELS), "delimiter": ","},
+        "display_order": 62,
+    },
+    "NOTIFICATION_ALERT_CHANNELS": {
+        "title": "Alert Notification Channels",
+        "description": "Comma-separated route for event alert notifications. Empty keeps all configured channels.",
+        "category": "notification",
+        "data_type": "array",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "",
+        "options": [{"label": channel, "value": channel} for channel in ROUTABLE_NOTIFICATION_CHANNELS],
+        "validation": {"allowed_values": list(ROUTABLE_NOTIFICATION_CHANNELS), "delimiter": ","},
+        "display_order": 63,
+    },
+    "NOTIFICATION_SYSTEM_ERROR_CHANNELS": {
+        "title": "System Error Notification Channels",
+        "description": "Comma-separated route reserved for system error notifications. Empty keeps all configured channels.",
+        "category": "notification",
+        "data_type": "array",
+        "ui_control": "textarea",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "",
+        "options": [{"label": channel, "value": channel} for channel in ROUTABLE_NOTIFICATION_CHANNELS],
+        "validation": {"allowed_values": list(ROUTABLE_NOTIFICATION_CHANNELS), "delimiter": ","},
+        "display_order": 64,
+    },
     "SCHEDULE_TIME": {
         "title": "Schedule Time",
         "description": "Daily schedule time in HH:MM format.",
@@ -1428,6 +1541,36 @@ _FIELD_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "options": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         "validation": {"enum": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]},
         "display_order": 30,
+    },
+    "WEBUI_HOST": {
+        "title": "Web UI Host",
+        "description": "Host address for Web UI service binding.",
+        "category": "system",
+        "data_type": "string",
+        "ui_control": "text",
+        "is_sensitive": False,
+        "is_required": False,
+        "is_editable": True,
+        "default_value": "127.0.0.1",
+        "options": [],
+        "validation": {},
+        "display_order": 39,
+        "help_key": "settings.system.WEBUI_HOST",
+        "examples": [
+            "WEBUI_HOST=127.0.0.1",
+            "WEBUI_HOST=0.0.0.0",
+        ],
+        "docs": [
+            {
+                "label": "云服务器访问 WebUI",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/deploy-webui-cloud.md",
+            },
+            {
+                "label": "完整指南：WebUI 与 API",
+                "href": "https://github.com/ZhuLinsen/daily_stock_analysis/blob/main/docs/full-guide.md#webui-与-api-服务",
+            },
+        ],
+        "warning_codes": ["public_bind_requires_auth", "restart_required"],
     },
     "WEBUI_PORT": {
         "title": "Web UI Port",

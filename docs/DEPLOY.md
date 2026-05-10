@@ -87,6 +87,15 @@ docker-compose -f ./docker/docker-compose.yml exec stock-analyzer python main.py
 - `./logs/` - 日志文件
 - `./reports/` - 分析报告
 
+### 6. 权限说明（重要）
+
+由于 Docker 镜像以非 root 用户 (`dsa`, UID 1000) 运行，若你在宿主机挂载卷时遇到 `Permission denied` 错误，请在宿主机执行以下命令：
+
+```bash
+# 授权宿主机挂载目录
+sudo chown -R 1000:1000 ./data ./logs ./reports
+```
+
 ---
 
 ## 🖥️ 方案二：直接部署

@@ -27,6 +27,11 @@ class _FakeNotifier:
         self.save_report_to_file = MagicMock(return_value="/tmp/report.md")
         self.is_available = MagicMock(return_value=True)
         self.get_available_channels = MagicMock(return_value=[NotificationChannel.EMAIL])
+        self.get_channels_for_route = MagicMock(
+            side_effect=lambda route_type, channels=None: list(
+                channels if channels is not None else self.get_available_channels()
+            )
+        )
         self.send_to_context = MagicMock(return_value=False)
         self._should_use_image_for_channel = MagicMock(
             side_effect=lambda channel, image_bytes: (
@@ -93,6 +98,11 @@ class _FakeWechatNotifier:
         self.save_report_to_file = MagicMock(return_value="/tmp/report.md")
         self.is_available = MagicMock(return_value=True)
         self.get_available_channels = MagicMock(return_value=[NotificationChannel.WECHAT])
+        self.get_channels_for_route = MagicMock(
+            side_effect=lambda route_type, channels=None: list(
+                channels if channels is not None else self.get_available_channels()
+            )
+        )
         self.send_to_context = MagicMock(return_value=False)
         self.generate_wechat_dashboard = MagicMock(return_value="wechat-dashboard")
         self._should_use_image_for_channel = MagicMock(
@@ -136,6 +146,78 @@ class TestPipelineWechatOnlyImageRouting(unittest.TestCase):
         self.assertTrue(
             any("企业微信 Markdown 转图片失败" in str(call.args[0]) for call in mock_warning.call_args_list)
         )
+
+
+class _FakeRoutedNotifier:
+    def __init__(self, routed_channels, image_channels=None):
+        self._markdown_to_image_channels = set(image_channels or [])
+        self._markdown_to_image_max_chars = 15000
+        self.generate_dashboard_report = MagicMock(side_effect=self._generate_dashboard_report)
+        self.save_report_to_file = MagicMock(return_value="/tmp/report.md")
+        self.is_available = MagicMock(return_value=True)
+        self.get_available_channels = MagicMock(
+            return_value=[
+                NotificationChannel.WECHAT,
+                NotificationChannel.TELEGRAM,
+                NotificationChannel.EMAIL,
+            ]
+        )
+        self.get_channels_for_route = MagicMock(return_value=list(routed_channels))
+        self.send_to_context = MagicMock(return_value=False)
+        self._should_use_image_for_channel = MagicMock(
+            side_effect=lambda channel, image_bytes: (
+                channel.value in self._markdown_to_image_channels and image_bytes is not None
+            )
+        )
+        self.generate_wechat_dashboard = MagicMock(return_value="wechat-dashboard")
+        self._send_wechat_image = MagicMock(return_value=True)
+        self.send_to_wechat = MagicMock(return_value=True)
+        self._send_telegram_photo = MagicMock(return_value=True)
+        self.send_to_telegram = MagicMock(return_value=True)
+        self._send_email_with_inline_image = MagicMock(return_value=True)
+        self.send_to_email = MagicMock(return_value=True)
+
+    @staticmethod
+    def _generate_dashboard_report(results):
+        return "report:" + ",".join(r.code for r in results)
+
+
+class TestPipelineReportRouteFiltering(unittest.TestCase):
+    def test_send_notifications_applies_report_route_before_channel_iteration(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.notifier = _FakeRoutedNotifier([NotificationChannel.TELEGRAM])
+        pipeline.config = SimpleNamespace(stock_email_groups=[])
+        results = [SimpleNamespace(code="000001")]
+
+        pipeline._send_notifications(results, ReportType.SIMPLE)
+
+        pipeline.notifier.get_channels_for_route.assert_called_once_with(
+            "report",
+            channels=[
+                NotificationChannel.WECHAT,
+                NotificationChannel.TELEGRAM,
+                NotificationChannel.EMAIL,
+            ],
+        )
+        pipeline.notifier.send_to_telegram.assert_called_once_with("report:000001")
+        pipeline.notifier.send_to_wechat.assert_not_called()
+        pipeline.notifier.send_to_email.assert_not_called()
+
+    def test_markdown_to_image_uses_route_filtered_channels(self):
+        pipeline = StockAnalysisPipeline.__new__(StockAnalysisPipeline)
+        pipeline.notifier = _FakeRoutedNotifier(
+            [NotificationChannel.EMAIL],
+            image_channels={"telegram"},
+        )
+        pipeline.config = SimpleNamespace(stock_email_groups=[])
+        results = [SimpleNamespace(code="000001")]
+
+        with patch("src.md2img.markdown_to_image", return_value=b"png") as mock_md2img:
+            pipeline._send_notifications(results, ReportType.SIMPLE)
+
+        mock_md2img.assert_not_called()
+        pipeline.notifier.send_to_email.assert_called_once_with("report:000001")
+        pipeline.notifier.send_to_telegram.assert_not_called()
 
 
 if __name__ == "__main__":

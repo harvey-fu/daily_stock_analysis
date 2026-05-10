@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Dict, Optional
 from unittest.mock import Mock, patch
 
 from tests.litellm_stub import ensure_litellm_stub
@@ -347,6 +348,19 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         )
         self.assertFalse(validation["valid"])
         self.assertTrue(any(issue["code"] == "invalid_url" for issue in validation["issues"]))
+
+    def test_validate_reports_invalid_notification_route_channel(self) -> None:
+        validation = self.service.validate(
+            items=[{"key": "NOTIFICATION_REPORT_CHANNELS", "value": "wechat,ntfy,email"}]
+        )
+        self.assertFalse(validation["valid"])
+        self.assertTrue(
+            any(
+                issue["key"] == "NOTIFICATION_REPORT_CHANNELS"
+                and issue["code"] == "invalid_allowed_value"
+                for issue in validation["issues"]
+            )
+        )
 
     def test_validate_warns_when_feishu_app_credentials_are_used_without_webhook(self) -> None:
         validation = self.service.validate(
@@ -847,6 +861,166 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertFalse(validation["valid"])
         self.assertTrue(any(issue["key"] == "LITELLM_MODEL" and issue["code"] == "missing_runtime_source" for issue in validation["issues"]))
 
+    @staticmethod
+    def _mock_http_response(status_code: int, json_body: Optional[Dict[str, Any]] = None):
+        response = Mock()
+        response.status_code = status_code
+        response.text = "ok" if status_code == 200 else "error"
+        response.json.return_value = json_body or {"errcode": 0}
+        return response
+
+    def _notification_test_env(self):
+        return patch.dict(os.environ, {"ENV_FILE": str(self.env_path)}, clear=True)
+
+    @patch("src.notification_sender.wechat_sender.requests.post")
+    def test_test_notification_channel_uses_temporary_items_without_persisting(self, mock_post) -> None:
+        mock_post.return_value = self._mock_http_response(200, {"errcode": 0})
+
+        with self._notification_test_env():
+            before_instance = Config.get_instance()
+            payload = self.service.test_notification_channel(
+                channel="wechat",
+                items=[{"key": "WECHAT_WEBHOOK_URL", "value": "https://qyapi.example.com/cgi-bin/webhook/send?key=secret"}],
+                title="Test title",
+                content="hello",
+                timeout_seconds=3,
+            )
+            self.assertIs(Config.get_instance(), before_instance)
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["attempts"][0]["latency_ms"] >= 0, True)
+        self.assertIn("key=***", payload["attempts"][0]["target"])
+        self.assertNotIn("WECHAT_WEBHOOK_URL", self.env_path.read_text(encoding="utf-8"))
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], 3)
+
+    def test_test_notification_channel_reports_missing_config(self) -> None:
+        with self._notification_test_env():
+            payload = self.service.test_notification_channel(
+                channel="telegram",
+                items=[{"key": "TELEGRAM_BOT_TOKEN", "value": "token"}],
+                title="Test title",
+                content="hello",
+                timeout_seconds=3,
+            )
+
+        self.assertFalse(payload["success"])
+        self.assertEqual(payload["error_code"], "config_missing")
+        self.assertIn("TELEGRAM_CHAT_ID", payload["message"])
+
+    @patch("src.notification_sender.wechat_sender.requests.post")
+    def test_test_notification_channel_skips_masked_secret_overwrite(self, mock_post) -> None:
+        self._rewrite_env("WECHAT_WEBHOOK_URL=https://saved.example.com/hook?key=savedsecret")
+        mock_post.return_value = self._mock_http_response(200, {"errcode": 0})
+
+        with self._notification_test_env():
+            payload = self.service.test_notification_channel(
+                channel="wechat",
+                items=[{"key": "WECHAT_WEBHOOK_URL", "value": "******"}],
+                mask_token="******",
+                title="Test title",
+                content="hello",
+                timeout_seconds=3,
+            )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(mock_post.call_args[0][0], "https://saved.example.com/hook?key=savedsecret")
+
+    @patch("src.notification_sender.custom_webhook_sender.requests.post")
+    def test_test_notification_channel_returns_custom_webhook_attempts(self, mock_post) -> None:
+        mock_post.side_effect = [
+            self._mock_http_response(500),
+            self._mock_http_response(200),
+        ]
+
+        with self._notification_test_env():
+            payload = self.service.test_notification_channel(
+                channel="custom",
+                items=[
+                    {
+                        "key": "CUSTOM_WEBHOOK_URLS",
+                        "value": (
+                            "https://example.com/robot/send?access_token=first,"
+                            "https://example.com/verylongsecrettoken1234567890"
+                        ),
+                    }
+                ],
+                title="Test title",
+                content="hello",
+                timeout_seconds=4,
+            )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(len(payload["attempts"]), 2)
+        self.assertFalse(payload["attempts"][0]["success"])
+        self.assertTrue(payload["attempts"][1]["success"])
+        self.assertIn("access_token=***", payload["attempts"][0]["target"])
+        self.assertNotIn("verylongsecrettoken1234567890", payload["attempts"][1]["target"])
+        self.assertEqual(mock_post.call_args_list[0].kwargs["timeout"], 4)
+
+    @patch("src.notification_sender.telegram_sender.requests.post")
+    def test_test_notification_channel_masks_short_sensitive_target(self, mock_post) -> None:
+        mock_post.return_value = self._mock_http_response(200, {"ok": True})
+
+        with self._notification_test_env():
+            payload = self.service.test_notification_channel(
+                channel="telegram",
+                items=[
+                    {"key": "TELEGRAM_BOT_TOKEN", "value": "tok123"},
+                    {"key": "TELEGRAM_CHAT_ID", "value": "chat-id"},
+                ],
+                title="Test title",
+                content="hello",
+                timeout_seconds=3,
+            )
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["attempts"][0]["target"], "***")
+        self.assertNotIn("tok123", str(payload))
+
+    @patch("src.notification_sender.wechat_sender.requests.post")
+    def test_test_notification_channel_strips_url_userinfo_from_target(self, mock_post) -> None:
+        mock_post.return_value = self._mock_http_response(200, {"errcode": 0})
+
+        with self._notification_test_env():
+            payload = self.service.test_notification_channel(
+                channel="wechat",
+                items=[
+                    {
+                        "key": "WECHAT_WEBHOOK_URL",
+                        "value": "https://user:password@example.com/cgi-bin/webhook/send?key=secret",
+                    }
+                ],
+                title="Test title",
+                content="hello",
+                timeout_seconds=3,
+            )
+
+        self.assertTrue(payload["success"])
+        target = payload["attempts"][0]["target"]
+        self.assertIn("https://example.com/cgi-bin/webhook/send?key=***", target)
+        self.assertNotIn("user", target)
+        self.assertNotIn("password", target)
+
+    @patch("src.notification_sender.discord_sender.requests.post")
+    def test_test_notification_channel_prefers_discord_main_channel_alias(self, mock_post) -> None:
+        mock_post.return_value = self._mock_http_response(200)
+
+        with self._notification_test_env():
+            payload = self.service.test_notification_channel(
+                channel="discord",
+                items=[
+                    {"key": "DISCORD_BOT_TOKEN", "value": "bot-token"},
+                    {"key": "DISCORD_MAIN_CHANNEL_ID", "value": "main-channel"},
+                    {"key": "DISCORD_CHANNEL_ID", "value": "legacy-channel"},
+                ],
+                title="Test title",
+                content="hello",
+                timeout_seconds=3,
+            )
+
+        self.assertTrue(payload["success"])
+        self.assertIn("/channels/main-channel/messages", mock_post.call_args[0][0])
+
     @patch("litellm.completion")
     def test_test_llm_channel_returns_success_payload(self, mock_completion) -> None:
         mock_completion.return_value = type(
@@ -1244,10 +1418,26 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             (Exception("account balance insufficient"), "quota", "insufficient_balance"),
             (RateLimitError("account balance insufficient"), "quota", "insufficient_balance"),
             (RateLimitError("insufficient_quota"), "quota", "quota_exceeded"),
+            (Exception("account balance insufficient; your request was blocked"), "quota", "insufficient_balance"),
+            (RateLimitError("rate limit: your request was blocked by policy"), "quota", "rate_limit"),
             (Exception("DNS lookup failed"), "network_error", "dns_error"),
             (Exception("TLS certificate verify failed"), "network_error", "tls_error"),
             (Exception("Connection refused"), "network_error", "connection_refused"),
+            (Exception("connection request was blocked by firewall"), "network_error", "network_error"),
+            (Exception("connection blocked by policy"), "network_error", "network_error"),
+            (Exception("request blocked by firewall"), "network_error", "network_error"),
+            (Exception("blocked"), "network_error", "unknown_error"),
             (Exception("model gpt-4o is not authorized for this account"), "model_not_found", "model_access_denied"),
+            (Exception("litellm.APIError: APIError: OpenAIException - Model disabled."), "model_not_found", "model_access_denied"),
+            (Exception("Model is disabled for this account"), "model_not_found", "model_access_denied"),
+            (
+                Exception("litellm.APIError: APIError: OpenAIException - Your request was blocked."),
+                "request_blocked",
+                "provider_blocked",
+            ),
+            (Exception("Forbidden: your request was blocked by content policy"), "request_blocked", "provider_blocked"),
+            (Exception("blocked by policy"), "request_blocked", "provider_blocked"),
+            (Exception("moderation_blocked"), "request_blocked", "provider_blocked"),
             (Exception("LLM Provider NOT provided for model foo"), "model_not_found", "provider_prefix_mismatch"),
         ]
 
@@ -1266,6 +1456,10 @@ class SystemConfigServiceTestCase(unittest.TestCase):
                 self.assertFalse(payload["success"])
                 self.assertEqual(payload["error_code"], error_code)
                 self.assertEqual(payload["details"]["reason"], reason)
+                if reason in {"model_access_denied", "provider_blocked"}:
+                    self.assertFalse(payload["retryable"])
+                    self.assertEqual(payload["details"]["model"], "openai/gpt-4o-mini")
+                    self.assertEqual(payload["resolved_model"], "openai/gpt-4o-mini")
 
     def test_test_llm_channel_reports_comma_only_api_key_as_missing(self) -> None:
         payload = self.service.test_llm_channel(
@@ -1327,8 +1521,14 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         billing_rate_limit_response.json.return_value = {"error": {"message": "account balance insufficient"}}
         quota_exceeded_response = Mock(ok=False, status_code=429, text="insufficient_quota")
         quota_exceeded_response.json.return_value = {"error": {"message": "insufficient_quota"}}
+        quota_blocked_response = Mock(ok=False, status_code=403, text="account balance insufficient; your request was blocked")
+        quota_blocked_response.json.return_value = {"error": {"message": "account balance insufficient; your request was blocked"}}
         rate_limit_response = Mock(ok=False, status_code=429, text="too many requests")
         rate_limit_response.json.return_value = {"error": {"message": "too many requests"}}
+        blocked_response = Mock(ok=False, status_code=403, text="Forbidden: your request was blocked by content policy")
+        blocked_response.json.return_value = {"error": {"message": "Forbidden: your request was blocked by content policy"}}
+        connection_blocked_response = Mock(ok=False, status_code=403, text="connection blocked by policy")
+        connection_blocked_response.json.return_value = {"error": {"message": "connection blocked by policy"}}
         invalid_json_response = Mock(ok=True, status_code=200, text="<html>bad gateway</html>")
         invalid_json_response.json.side_effect = ValueError("invalid json")
 
@@ -1338,7 +1538,10 @@ class SystemConfigServiceTestCase(unittest.TestCase):
             (billing_response, "quota", "model_discovery", True, "insufficient_balance"),
             (billing_rate_limit_response, "quota", "model_discovery", True, "insufficient_balance"),
             (quota_exceeded_response, "quota", "model_discovery", True, "quota_exceeded"),
+            (quota_blocked_response, "quota", "model_discovery", True, "insufficient_balance"),
             (rate_limit_response, "quota", "model_discovery", True, "rate_limit"),
+            (blocked_response, "request_blocked", "model_discovery", False, "provider_blocked"),
+            (connection_blocked_response, "network_error", "model_discovery", True, "network_error"),
             (invalid_json_response, "format_error", "response_parse", False, "non_json"),
         ]:
             with self.subTest(error_code=error_code):
@@ -1533,6 +1736,27 @@ class SystemConfigServiceTestCase(unittest.TestCase):
         self.assertIn("不会自动重建 scheduler", schedule_warning)
         self.assertIn("以 schedule 模式重新启动后生效", schedule_warning)
         self.assertNotIn("它属于启动期单次运行配置", schedule_warning)
+
+    def test_update_appends_webui_bind_restart_warning(self) -> None:
+        response = self.service.update(
+            config_version=self.manager.get_config_version(),
+            items=[
+                {"key": "WEBUI_HOST", "value": "0.0.0.0"},
+                {"key": "WEBUI_PORT", "value": "18000"},
+            ],
+            reload_now=True,
+        )
+
+        self.assertTrue(response["success"])
+        bind_warning = next(
+            warning
+            for warning in response["warnings"]
+            if "WEBUI_HOST" in warning and "WEBUI_PORT" in warning
+        )
+
+        self.assertIn("启动期监听配置", bind_warning)
+        self.assertIn("不会因为本次保存重新绑定监听地址或端口", bind_warning)
+        self.assertIn("重启当前进程、Docker 容器或服务管理器后生效", bind_warning)
 
     def test_update_warns_when_runtime_model_references_are_cleared(self) -> None:
         self._rewrite_env(

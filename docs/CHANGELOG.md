@@ -11,9 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 <!-- 新条目格式：- [类型] 描述（类型取值：新功能/改进/修复/文档/测试/chore）-->
 <!-- 每条独立一行追加到本段末尾，无需分类标题，合并时冲突最小 -->
-- [改进] 放宽 LiteLLM 依赖约束，保留 `>=1.80.10` 最低版本并显式排除 PyPI 事故版本 `1.82.7` / `1.82.8`，允许安装后续 1.x 修复版本。
-- [改进] 补齐通知渠道 P0 基线、Actions 映射与 `--check-notify` 只读诊断，完善 AstrBot 配置入口和通知回归快照。
-- [chore] 清理仓库根目录：移除误入库的 `.codex`、`review.md` 跟踪记录，将 smoke 测试入口迁移到 `scripts/`、环境检查脚本迁移为 `scripts/check_env.py`，并将 LiteLLM YAML 示例迁移到 `docs/examples/`。
+
+- [新功能] Web 系统设置页开放 `.env` 配置备份导入/导出，复用键级覆盖、配置版本冲突保护和重载链路；Web 端在 `ADMIN_AUTH_ENABLED=false` 时该入口为禁用状态。
+- [chore] 精简仓库根目录：将文档图片资源迁入 `docs/assets/`，将东方财富请求补丁迁入 `src/patches/`，并下移 CI 专用依赖文件与技能适配服务。
+- [文档] 更新多语言 README 首页浅色工作台 GIF，并精简功能特性表，保留原有赞助商、快速开始和推送效果结构。
+
+## [3.16.0] - 2026-05-10
+
+### 发布亮点
+
+- feat: Web 首页新增“大盘复盘”触发入口、任务轮询与完成后报告直出；首次启动配置状态可提示缺口并引导到系统设置。
+- feat: 新增通知路由策略，支持按 report、alert、system_error 将通知收窄到指定渠道；Web 设置页支持通知渠道一键测试。
+- feat: 系统设置页新增配置项帮助入口与多语言帮助文案基础设施，首批覆盖自选股、LLM 主模型、LLM 渠道、飞书 Webhook 与 WebUI 监听地址。
+- improve: 大盘复盘 API、CLI、Bot 共用 `build_market_review_runtime` 装配路径，补齐 `litellm_model` / `llm_model_list` 与 legacy key 回退说明。
+- improve: 个股报告操作建议结合支撑/压力、量能、筹码与主力资金流校准，减少买入/卖出剧烈切换，并补强 Agent 决策兜底。
+- improve: Docker 镜像支持非 root 用户运行，LiteLLM 依赖约束放宽到后续安全 1.x 修复版本。
+- fix: 修正 LLM 渠道测试中 `Model disabled`、provider blocked 等错误分类，避免被误报为网络异常。
+- fix: 港股日线跳过不支持港股的内置历史数据源；北交所 `BJ` 前缀与 `.BJ` 后缀代码校验保持一致。
+- fix: Web 大盘复盘按钮可观测性、Windows fallback 锁进程探测和催化线索展示更稳健。
+- docs: 新增文档中心与配置帮助维护说明，清理 README、完整指南与配置指南中的临时 PR/文档同步说明。
+
+### What's Changed
+
+- feat: Add a Web home market-review trigger with task polling and inline report display; setup status now points users to missing configuration.
+- feat: Add notification routing by report, alert, and system_error; add one-click notification channel testing in Web settings.
+- feat: Add settings field help infrastructure with multilingual help text for the first batch of core configuration fields.
+- improve: Share `build_market_review_runtime` across API, CLI, and Bot market review paths; document `litellm_model` / `llm_model_list` and legacy key fallback behavior.
+- improve: Calibrate stock advice with support/resistance, volume, chips, and main-force capital flow; strengthen Agent decision fallback behavior.
+- improve: Run Docker images as a non-root user and relax LiteLLM constraints to allow safe future 1.x fixes.
+- fix: Classify `Model disabled`, provider blocked, and related LLM channel test errors more accurately instead of reporting them as generic network failures.
+- fix: Avoid unsupported built-in historical providers for Hong Kong daily data; align Beijing Stock Exchange `BJ` prefix and `.BJ` suffix validation.
+- fix: Improve Web market-review observability, Windows fallback lock probing, and market catalyst snippet rendering.
+- docs: Add the documentation index and settings-help maintenance guide; remove temporary PR/doc-sync notes from README and user-facing guides.
 
 ## [3.15.0] - 2026-05-05
 
@@ -1414,7 +1443,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/ZhuLinsen/daily_stock_analysis/compare/v3.15.0...HEAD
+[Unreleased]: https://github.com/ZhuLinsen/daily_stock_analysis/compare/v3.16.0...HEAD
+[3.16.0]: https://github.com/ZhuLinsen/daily_stock_analysis/compare/v3.15.0...v3.16.0
 [3.15.0]: https://github.com/ZhuLinsen/daily_stock_analysis/compare/v3.14.2...v3.15.0
 [3.14.2]: https://github.com/ZhuLinsen/daily_stock_analysis/compare/v3.14.1...v3.14.2
 [3.14.1]: https://github.com/ZhuLinsen/daily_stock_analysis/compare/v3.14.0...v3.14.1

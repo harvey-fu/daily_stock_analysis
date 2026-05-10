@@ -7,8 +7,9 @@
 """
 import logging
 import json
+import time
 from string import Template
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -160,6 +161,110 @@ class CustomWebhookSender:
         logger.error(f"自定义 Webhook 推送失败: HTTP {response.status_code}")
         logger.debug(f"响应内容: {response.text[:200]}")
         return False
+
+    def test_custom_webhooks(self, content: str, *, timeout_seconds: float = 20.0) -> List[Dict[str, Any]]:
+        """Send a test message to each custom webhook and return raw per-URL attempts."""
+        attempts: List[Dict[str, Any]] = []
+        for index, url in enumerate(self._custom_webhook_urls):
+            try:
+                payload = self._build_custom_webhook_payload(url, content)
+                attempts.append(
+                    self._post_custom_webhook_attempt(
+                        url=url,
+                        payload=payload,
+                        timeout_seconds=timeout_seconds,
+                        index=index,
+                    )
+                )
+            except Exception as exc:
+                attempts.append({
+                    "channel": "custom",
+                    "success": False,
+                    "message": f"自定义 Webhook {index + 1} 测试异常: {exc}",
+                    "target": url,
+                    "error_code": self._classify_custom_webhook_exception(exc)[0],
+                    "stage": "notification_send",
+                    "retryable": self._classify_custom_webhook_exception(exc)[1],
+                    "latency_ms": None,
+                    "http_status": None,
+                })
+        return attempts
+
+    def _post_custom_webhook_attempt(
+        self,
+        *,
+        url: str,
+        payload: dict,
+        timeout_seconds: float,
+        index: int,
+    ) -> Dict[str, Any]:
+        headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'User-Agent': 'StockAnalysis/1.0',
+        }
+        if self._custom_webhook_bearer_token:
+            headers['Authorization'] = f'Bearer {self._custom_webhook_bearer_token}'
+
+        body = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+        started_at = time.perf_counter()
+        try:
+            response = requests.post(
+                url,
+                data=body,
+                headers=headers,
+                timeout=timeout_seconds,
+                verify=self._webhook_verify_ssl,
+            )
+        except Exception as exc:
+            error_code, retryable = self._classify_custom_webhook_exception(exc)
+            return {
+                "channel": "custom",
+                "success": False,
+                "message": f"自定义 Webhook {index + 1} 测试失败: {exc}",
+                "target": url,
+                "error_code": error_code,
+                "stage": "notification_send",
+                "retryable": retryable,
+                "latency_ms": int((time.perf_counter() - started_at) * 1000),
+                "http_status": None,
+            }
+
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        if response.status_code == 200:
+            return {
+                "channel": "custom",
+                "success": True,
+                "message": f"自定义 Webhook {index + 1} 测试发送成功",
+                "target": url,
+                "error_code": None,
+                "stage": "notification_send",
+                "retryable": False,
+                "latency_ms": latency_ms,
+                "http_status": response.status_code,
+            }
+
+        retryable = response.status_code == 429 or response.status_code >= 500
+        return {
+            "channel": "custom",
+            "success": False,
+            "message": f"自定义 Webhook {index + 1} 测试失败: HTTP {response.status_code}",
+            "target": url,
+            "error_code": "http_error",
+            "stage": "notification_send",
+            "retryable": retryable,
+            "latency_ms": latency_ms,
+            "http_status": response.status_code,
+        }
+
+    @staticmethod
+    def _classify_custom_webhook_exception(exc: Exception) -> Tuple[str, bool]:
+        if isinstance(exc, requests.exceptions.Timeout):
+            return "timeout", True
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            return "network_error", True
+        if isinstance(exc, requests.exceptions.RequestException):
+            return "network_error", True
+        return "unexpected_error", False
     
     def _build_custom_webhook_payload(self, url: str, content: str) -> dict:
         """

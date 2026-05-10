@@ -482,6 +482,16 @@ class DataFetcherManager:
     - 失败后自动切换到下一个
     - 所有数据源都失败时抛出异常
     """
+
+    _DAILY_MARKET_FETCHER_SUPPORT = {
+        "EfinanceFetcher": {"cn"},
+        "AkshareFetcher": {"cn", "hk"},
+        "TushareFetcher": {"cn", "hk"},
+        "PytdxFetcher": {"cn"},
+        "BaostockFetcher": {"cn"},
+        "YfinanceFetcher": {"cn", "hk", "us"},
+        "LongbridgeFetcher": {"hk", "us"},
+    }
     
     def __init__(self, fetchers: Optional[List[BaseFetcher]] = None):
         """
@@ -545,6 +555,33 @@ class DataFetcherManager:
         method = getattr(fetcher, method_name)
         with self._get_fetcher_call_lock(fetcher):
             return method(*args, **kwargs)
+
+    @classmethod
+    def _filter_daily_fetchers_for_market(
+        cls,
+        fetchers: List[BaseFetcher],
+        market: str,
+    ) -> List[BaseFetcher]:
+        """Skip built-in daily fetchers that are known not to support a market."""
+        if market not in {"cn", "hk", "us"}:
+            return fetchers
+
+        kept: List[BaseFetcher] = []
+        skipped: List[str] = []
+        for fetcher in fetchers:
+            supported = cls._DAILY_MARKET_FETCHER_SUPPORT.get(fetcher.name)
+            if supported is not None and market not in supported:
+                skipped.append(fetcher.name)
+            else:
+                kept.append(fetcher)
+
+        if skipped:
+            logger.info(
+                "[数据源路由] %s 日线跳过不支持的数据源: %s",
+                market,
+                ", ".join(skipped),
+            )
+        return kept
 
     def _get_cached_stock_name(self, stock_code: str) -> Optional[str]:
         self._ensure_concurrency_guards()
@@ -935,16 +972,18 @@ class DataFetcherManager:
 
         fetchers = self._get_fetchers_snapshot()
         errors = []
-        total_fetchers = len(fetchers)
         request_start = time.time()
 
-        # 快速路径：美股/港股使用专用数据源路由
+        # 快速路径：美股使用专用数据源路由；港股先过滤不支持港股日线的数据源
         #   - 配置长桥凭据后: Longbridge 为首选, YFinance/AkShare 兜底
         #   - 未配置长桥:     YFinance 为首选（美股）, 通用 fetcher 循环（港股）
         #   - 美股指数:       始终 YFinance 为首选（Longbridge 不提供指数K线）
         is_us_index = is_us_index_code(stock_code)
         is_us = is_us_index or is_us_stock_code(stock_code)
         is_hk = (not is_us) and _is_hk_market(stock_code)
+        if is_hk:
+            fetchers = self._filter_daily_fetchers_for_market(fetchers, "hk")
+        total_fetchers = len(fetchers)
 
         # 美股（含美股指数）使用 Longbridge/YFinance 特殊路由；港股走下方通用数据源循环
         if is_us:

@@ -23,6 +23,10 @@ from enum import Enum
 
 from src.config import Config, get_config
 from src.enums import ReportType
+from src.notification_routing import (
+    get_notification_route_config,
+    split_notification_route_channels,
+)
 from src.report_language import (
     get_localized_stock_name,
     get_report_labels,
@@ -341,6 +345,42 @@ class NotificationService(
     def get_available_channels(self) -> List[NotificationChannel]:
         """获取所有已配置的渠道"""
         return self._available_channels
+
+    def get_channels_for_route(
+        self,
+        route_type: Optional[str],
+        channels: Optional[List[NotificationChannel]] = None,
+    ) -> List[NotificationChannel]:
+        """Return channels allowed for a route type.
+
+        ``route_type=None`` keeps the legacy behavior and returns all supplied
+        static channels. Empty route config also keeps all supplied channels.
+        Non-empty route config that matches no enabled channel returns an empty
+        list.
+        """
+        target_channels = list(channels if channels is not None else self._available_channels)
+        if route_type is None:
+            return target_channels
+
+        route_config = get_notification_route_config(route_type)
+        if route_config is None:
+            logger.warning("未知通知路由类型 %s，沿用全部已配置渠道", route_type)
+            return target_channels
+
+        configured_route_channels = getattr(self._config, route_config["config_attr"], []) or []
+        if not configured_route_channels:
+            return target_channels
+
+        valid_channels, invalid_channels = split_notification_route_channels(configured_route_channels)
+        if invalid_channels:
+            logger.warning(
+                "%s 包含未知通知渠道，将忽略: %s",
+                route_config["env_key"],
+                ", ".join(invalid_channels),
+            )
+
+        allowed = set(valid_channels)
+        return [channel for channel in target_channels if channel.value in allowed]
     
     def get_channel_names(self) -> str:
         """获取所有已配置渠道的名称"""
@@ -1585,7 +1625,8 @@ class NotificationService(
         self,
         content: str,
         email_stock_codes: Optional[List[str]] = None,
-        email_send_to_all: bool = False
+        email_send_to_all: bool = False,
+        route_type: Optional[str] = None,
     ) -> bool:
         """
         统一发送接口 - 向所有已配置的渠道发送
@@ -1602,6 +1643,7 @@ class NotificationService(
             content: 消息内容（Markdown 格式）
             email_stock_codes: 股票代码列表（可选，用于邮件渠道路由到对应分组邮箱，Issue #268）
             email_send_to_all: 邮件是否发往所有配置邮箱（用于大盘复盘等无股票归属的内容）
+            route_type: 通知路由类型；None 保持旧行为，report/alert/system_error 按配置过滤静态渠道
 
         Returns:
             是否至少有一个渠道发送成功
@@ -1615,11 +1657,19 @@ class NotificationService(
             logger.warning("通知服务不可用，跳过推送")
             return False
 
+        target_channels = self.get_channels_for_route(route_type)
+        if not target_channels:
+            if context_success:
+                logger.info("已通过消息上下文渠道完成推送（路由后无其他通知渠道）")
+                return True
+            logger.warning("通知路由 %s 未命中任何已配置渠道，跳过静态通知渠道", route_type)
+            return False
+
         # Markdown to image (Issue #289): convert once if any channel needs it.
         # Per-channel decision via _should_use_image_for_channel (see send() docstring for fallback rules).
         image_bytes = None
         channels_needing_image = {
-            ch for ch in self._available_channels
+            ch for ch in target_channels
             if ch.value in self._markdown_to_image_channels
         }
         if channels_needing_image:
@@ -1645,13 +1695,13 @@ class NotificationService(
                     hint,
                 )
 
-        channel_names = self.get_channel_names()
-        logger.info(f"正在向 {len(self._available_channels)} 个渠道发送通知：{channel_names}")
+        channel_names = ', '.join(ChannelDetector.get_channel_name(ch) for ch in target_channels)
+        logger.info(f"正在向 {len(target_channels)} 个渠道发送通知：{channel_names}")
 
         success_count = 0
         fail_count = 0
 
-        for channel in self._available_channels:
+        for channel in target_channels:
             channel_name = ChannelDetector.get_channel_name(channel)
             use_image = self._should_use_image_for_channel(channel, image_bytes)
             try:

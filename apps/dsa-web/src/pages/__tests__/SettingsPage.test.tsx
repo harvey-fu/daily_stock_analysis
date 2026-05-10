@@ -5,8 +5,8 @@ import { resolveWebBuildInfo } from '../../utils/constants';
 import SettingsPage from '../SettingsPage';
 
 const {
-  exportDesktopEnv,
-  importDesktopEnv,
+  exportEnv,
+  importEnv,
   desktopCheckForUpdates,
   desktopGetUpdateState,
   desktopOnUpdateStateChange,
@@ -24,8 +24,8 @@ const {
   useSystemConfigMock,
   webBuildInfoMock,
 } = vi.hoisted(() => ({
-  exportDesktopEnv: vi.fn(),
-  importDesktopEnv: vi.fn(),
+  exportEnv: vi.fn(),
+  importEnv: vi.fn(),
   desktopCheckForUpdates: vi.fn(),
   desktopGetUpdateState: vi.fn(),
   desktopOnUpdateStateChange: vi.fn(),
@@ -59,8 +59,8 @@ vi.mock('../../hooks', () => ({
 
 vi.mock('../../api/systemConfig', () => ({
   systemConfigApi: {
-    exportDesktopEnv: (...args: unknown[]) => exportDesktopEnv(...args),
-    importDesktopEnv: (...args: unknown[]) => importDesktopEnv(...args),
+    exportEnv: (...args: unknown[]) => exportEnv(...args),
+    importEnv: (...args: unknown[]) => importEnv(...args),
   },
 }));
 
@@ -91,6 +91,9 @@ vi.mock('../../components/settings', () => ({
     >
       save llm channels
     </button>
+  ),
+  NotificationTestPanel: ({ items }: { items: Array<{ key: string; value: string }> }) => (
+    <div>通知测试面板:{items.map((item) => item.key).join(',')}</div>
   ),
   SettingsAlert: ({
     title,
@@ -168,7 +171,8 @@ const baseCategories = [
   { category: 'system', title: 'System', description: '系统设置', displayOrder: 1, fields: [] },
   { category: 'base', title: 'Base', description: '基础配置', displayOrder: 2, fields: [] },
   { category: 'ai_model', title: 'AI', description: '模型配置', displayOrder: 3, fields: [] },
-  { category: 'agent', title: 'Agent', description: 'Agent 配置', displayOrder: 4, fields: [] },
+  { category: 'notification', title: 'Notification', description: '通知配置', displayOrder: 4, fields: [] },
+  { category: 'agent', title: 'Agent', description: 'Agent 配置', displayOrder: 5, fields: [] },
 ];
 
 type ConfigState = {
@@ -283,6 +287,26 @@ function buildSystemConfigState(overrides: ConfigOverride = {}) {
           },
         },
       ],
+      notification: [
+        {
+          key: 'WECHAT_WEBHOOK_URL',
+          value: 'https://qyapi.example.com/hook',
+          rawValueExists: true,
+          isMasked: false,
+          schema: {
+            key: 'WECHAT_WEBHOOK_URL',
+            category: 'notification',
+            dataType: 'string',
+            uiControl: 'password',
+            isSensitive: true,
+            isRequired: false,
+            isEditable: true,
+            options: [],
+            validation: {},
+            displayOrder: 1,
+          },
+        },
+      ],
     },
     issueByKey: {},
     activeCategory: 'system',
@@ -321,12 +345,12 @@ describe('SettingsPage', () => {
       isFallbackVersion: false,
     });
     load.mockResolvedValue(true);
-    exportDesktopEnv.mockResolvedValue({
+    exportEnv.mockResolvedValue({
       content: 'STOCK_LIST=600519\n',
       configVersion: 'v1',
       updatedAt: '2026-03-21T00:00:00Z',
     });
-    importDesktopEnv.mockResolvedValue({
+    importEnv.mockResolvedValue({
       success: true,
       configVersion: 'v2',
       appliedCount: 1,
@@ -598,14 +622,61 @@ describe('SettingsPage', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it('does not render desktop env backup card outside desktop runtime', () => {
+  it('renders notification test panel before notification fields', () => {
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({ activeCategory: 'notification' }));
+
     render(<SettingsPage />);
 
-    expect(screen.queryByRole('heading', { name: '配置备份' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '导出 .env' })).not.toBeInTheDocument();
+    expect(screen.getByText('通知测试面板:WECHAT_WEBHOOK_URL')).toBeInTheDocument();
+    expect(screen.getByText('WECHAT_WEBHOOK_URL')).toBeInTheDocument();
   });
 
-  it('renders desktop env backup actions in desktop runtime and exports saved env', async () => {
+  it('renders env backup actions outside desktop runtime', () => {
+    render(<SettingsPage />);
+
+    expect(screen.getByRole('heading', { name: '配置备份' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '导出 .env' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '导入 .env' })).toBeInTheDocument();
+  });
+
+  it('disables env backup actions when web auth is not enabled', () => {
+    useAuthMock.mockReturnValue({
+      authEnabled: false,
+      passwordChangeable: false,
+      refreshStatus,
+    });
+
+    render(<SettingsPage />);
+
+    expect(screen.getByText(/当前 Web 端未开启管理员鉴权/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '导出 .env' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '导入 .env' })).toBeDisabled();
+  });
+
+  it('uses live auth state for env backup availability instead of loaded config items', () => {
+    const configState = buildSystemConfigState();
+    useSystemConfigMock.mockReturnValue(buildSystemConfigState({
+      itemsByCategory: {
+        ...configState.itemsByCategory,
+        system: configState.itemsByCategory.system.map((item) => (
+          item.key === 'ADMIN_AUTH_ENABLED' ? { ...item, value: 'false' } : item
+        )),
+      },
+    }));
+    useAuthMock.mockReturnValue({
+      authEnabled: true,
+      passwordChangeable: true,
+      refreshStatus,
+    });
+
+    render(<SettingsPage />);
+
+    expect(screen.queryByText(/当前 Web 端未开启管理员鉴权/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '导出 .env' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: '导入 .env' })).not.toBeDisabled();
+  });
+
+  it('exports saved env from config backup actions', async () => {
     (window as { dsaDesktop?: unknown }).dsaDesktop = { version: '3.12.0' };
 
     render(<SettingsPage />);
@@ -614,7 +685,7 @@ describe('SettingsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '导出 .env' }));
 
-    await waitFor(() => expect(exportDesktopEnv).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(exportEnv).toHaveBeenCalledTimes(1));
     expect(mockedAnchorClick).toHaveBeenCalledTimes(1);
     expect(load).not.toHaveBeenCalled();
   });
@@ -630,10 +701,10 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '导入 .env' }));
 
     expect(await screen.findByText('导入会覆盖当前草稿')).toBeInTheDocument();
-    expect(importDesktopEnv).not.toHaveBeenCalled();
+    expect(importEnv).not.toHaveBeenCalled();
   });
 
-  it('reloads config after successful desktop env import', async () => {
+  it('reloads config after successful env import', async () => {
     (window as { dsaDesktop?: unknown }).dsaDesktop = { version: '3.12.0' };
 
     const { container } = render(<SettingsPage />);
@@ -649,11 +720,11 @@ describe('SettingsPage', () => {
       },
     });
 
-    await waitFor(() => expect(importDesktopEnv).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(importEnv).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
   });
 
-  it('shows an error when desktop env import succeeds but reload fails', async () => {
+  it('shows an error when env import succeeds but reload fails', async () => {
     (window as { dsaDesktop?: unknown }).dsaDesktop = { version: '3.12.0' };
     load.mockResolvedValue(false);
 
@@ -671,7 +742,7 @@ describe('SettingsPage', () => {
       },
     });
 
-    await waitFor(() => expect(importDesktopEnv).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(importEnv).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
     expect(screen.getByText('配置已导入但刷新失败')).toBeInTheDocument();
     expect(screen.getByText('备份已导入，但重新加载配置失败，请手动重载页面。')).toBeInTheDocument();

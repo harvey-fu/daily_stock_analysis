@@ -31,6 +31,7 @@ from src.config import (
     normalize_news_strategy_profile,
     normalize_llm_channel_model,
     parse_env_bool,
+    parse_env_int,
     resolve_news_window_days,
     resolve_llm_channel_protocol,
     setup_env,
@@ -101,6 +102,80 @@ class SystemConfigService:
             "strategy": "specialist",
             "skill": "specialist",
         }
+    }
+    _NOTIFICATION_TEST_CHANNELS: Tuple[str, ...] = (
+        "wechat",
+        "feishu",
+        "telegram",
+        "email",
+        "pushover",
+        "pushplus",
+        "serverchan3",
+        "custom",
+        "discord",
+        "slack",
+        "astrbot",
+    )
+    _NOTIFICATION_TEST_KEY_MAP: Dict[str, Tuple[str, str]] = {
+        "WECHAT_WEBHOOK_URL": ("wechat_webhook_url", "string"),
+        "WECHAT_MSG_TYPE": ("wechat_msg_type", "string"),
+        "WECHAT_MAX_BYTES": ("wechat_max_bytes", "int"),
+        "FEISHU_WEBHOOK_URL": ("feishu_webhook_url", "string"),
+        "FEISHU_WEBHOOK_SECRET": ("feishu_webhook_secret", "string"),
+        "FEISHU_WEBHOOK_KEYWORD": ("feishu_webhook_keyword", "string"),
+        "FEISHU_MAX_BYTES": ("feishu_max_bytes", "int"),
+        "TELEGRAM_BOT_TOKEN": ("telegram_bot_token", "string"),
+        "TELEGRAM_CHAT_ID": ("telegram_chat_id", "string"),
+        "TELEGRAM_MESSAGE_THREAD_ID": ("telegram_message_thread_id", "string"),
+        "EMAIL_SENDER": ("email_sender", "string"),
+        "EMAIL_SENDER_NAME": ("email_sender_name", "string"),
+        "EMAIL_PASSWORD": ("email_password", "string"),
+        "EMAIL_RECEIVERS": ("email_receivers", "csv"),
+        "PUSHOVER_USER_KEY": ("pushover_user_key", "string"),
+        "PUSHOVER_API_TOKEN": ("pushover_api_token", "string"),
+        "PUSHPLUS_TOKEN": ("pushplus_token", "string"),
+        "PUSHPLUS_TOPIC": ("pushplus_topic", "string"),
+        "SERVERCHAN3_SENDKEY": ("serverchan3_sendkey", "string"),
+        "CUSTOM_WEBHOOK_URLS": ("custom_webhook_urls", "csv"),
+        "CUSTOM_WEBHOOK_BEARER_TOKEN": ("custom_webhook_bearer_token", "string"),
+        "CUSTOM_WEBHOOK_BODY_TEMPLATE": ("custom_webhook_body_template", "string"),
+        "WEBHOOK_VERIFY_SSL": ("webhook_verify_ssl", "bool"),
+        "DISCORD_WEBHOOK_URL": ("discord_webhook_url", "string"),
+        "DISCORD_BOT_TOKEN": ("discord_bot_token", "string"),
+        "DISCORD_MAIN_CHANNEL_ID": ("discord_main_channel_id", "string"),
+        "DISCORD_CHANNEL_ID": ("discord_main_channel_id", "string"),
+        "DISCORD_MAX_WORDS": ("discord_max_words", "int"),
+        "SLACK_WEBHOOK_URL": ("slack_webhook_url", "string"),
+        "SLACK_BOT_TOKEN": ("slack_bot_token", "string"),
+        "SLACK_CHANNEL_ID": ("slack_channel_id", "string"),
+        "ASTRBOT_URL": ("astrbot_url", "string"),
+        "ASTRBOT_TOKEN": ("astrbot_token", "string"),
+    }
+    _NOTIFICATION_REQUIRED_KEY_GROUPS: Dict[str, Tuple[Tuple[str, ...], ...]] = {
+        "wechat": (("WECHAT_WEBHOOK_URL",),),
+        "feishu": (("FEISHU_WEBHOOK_URL",),),
+        "telegram": (("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"),),
+        "email": (("EMAIL_SENDER", "EMAIL_PASSWORD"),),
+        "pushover": (("PUSHOVER_USER_KEY", "PUSHOVER_API_TOKEN"),),
+        "pushplus": (("PUSHPLUS_TOKEN",),),
+        "serverchan3": (("SERVERCHAN3_SENDKEY",),),
+        "custom": (("CUSTOM_WEBHOOK_URLS",),),
+        "discord": (("DISCORD_WEBHOOK_URL",), ("DISCORD_BOT_TOKEN", "DISCORD_MAIN_CHANNEL_ID"), ("DISCORD_BOT_TOKEN", "DISCORD_CHANNEL_ID")),
+        "slack": (("SLACK_WEBHOOK_URL",), ("SLACK_BOT_TOKEN", "SLACK_CHANNEL_ID")),
+        "astrbot": (("ASTRBOT_URL",),),
+    }
+    _NOTIFICATION_TEST_TARGET_KEYS: Dict[str, Tuple[str, ...]] = {
+        "wechat": ("WECHAT_WEBHOOK_URL",),
+        "feishu": ("FEISHU_WEBHOOK_URL",),
+        "telegram": ("TELEGRAM_BOT_TOKEN",),
+        "email": ("EMAIL_RECEIVERS", "EMAIL_SENDER"),
+        "pushover": ("PUSHOVER_USER_KEY",),
+        "pushplus": ("PUSHPLUS_TOPIC",),
+        "serverchan3": ("SERVERCHAN3_SENDKEY",),
+        "custom": ("CUSTOM_WEBHOOK_URLS",),
+        "discord": ("DISCORD_WEBHOOK_URL", "DISCORD_MAIN_CHANNEL_ID", "DISCORD_CHANNEL_ID"),
+        "slack": ("SLACK_WEBHOOK_URL", "SLACK_CHANNEL_ID"),
+        "astrbot": ("ASTRBOT_URL",),
     }
 
     def __init__(self, manager: Optional[ConfigManager] = None):
@@ -229,6 +304,71 @@ class SystemConfigService:
             "issues": issues,
         }
 
+    def test_notification_channel(
+        self,
+        *,
+        channel: str,
+        items: Sequence[Dict[str, str]],
+        mask_token: str = "******",
+        title: str = "DSA 通知测试",
+        content: str = "这是一条来自 DSA Web 设置页的通知测试消息。",
+        timeout_seconds: float = 20.0,
+    ) -> Dict[str, Any]:
+        """Send one real notification test without persisting submitted values."""
+        normalized_channel = (channel or "").strip().lower()
+        if normalized_channel not in self._NOTIFICATION_TEST_CHANNELS:
+            raise ValueError(f"Unsupported notification channel: {channel}")
+
+        effective_map = self._build_notification_test_effective_map(
+            items=items,
+            mask_token=mask_token,
+        )
+        missing = self._get_missing_notification_test_keys(normalized_channel, effective_map)
+        if missing:
+            return self._build_notification_test_result(
+                success=False,
+                message=f"通知渠道配置不完整，缺少: {', '.join(missing)}",
+                error_code="config_missing",
+                stage="config_validation",
+                retryable=False,
+                latency_ms=None,
+                attempts=[],
+            )
+
+        config = self._build_notification_test_config(effective_map)
+        try:
+            return self._dispatch_notification_test(
+                channel=normalized_channel,
+                config=config,
+                effective_map=effective_map,
+                title=title.strip(),
+                content=content.strip(),
+                timeout_seconds=float(timeout_seconds),
+            )
+        except Exception as exc:
+            logger.warning("Notification channel test failed for %s: %s", normalized_channel, exc)
+            error_code, retryable = self._classify_notification_exception(exc)
+            return self._build_notification_test_result(
+                success=False,
+                message=f"通知测试异常: {exc}",
+                error_code=error_code,
+                stage="notification_send",
+                retryable=retryable,
+                latency_ms=None,
+                attempts=[
+                    {
+                        "channel": normalized_channel,
+                        "success": False,
+                        "message": str(exc),
+                        "target": self._resolve_notification_test_target(normalized_channel, effective_map),
+                        "error_code": error_code,
+                        "stage": "notification_send",
+                        "retryable": retryable,
+                        "latency_ms": None,
+                    }
+                ],
+            )
+
     def get_setup_status(self) -> Dict[str, Any]:
         """Return read-only first-run setup status without mutating runtime state."""
         effective_map = self._build_setup_effective_config_map()
@@ -255,8 +395,8 @@ class SystemConfigService:
             "checks": checks,
         }
 
-    def export_desktop_env(self) -> Dict[str, Any]:
-        """Return the raw active `.env` content for desktop-only backup."""
+    def export_env(self) -> Dict[str, Any]:
+        """Return the raw active `.env` content for backup."""
         if self._manager.env_path.exists():
             content = self._manager.env_path.read_text(encoding="utf-8")
         else:
@@ -268,7 +408,11 @@ class SystemConfigService:
             "updated_at": self._manager.get_updated_at(),
         }
 
-    def import_desktop_env(
+    def export_desktop_env(self) -> Dict[str, Any]:
+        """Return the raw active `.env` content for desktop backup compatibility."""
+        return self.export_env()
+
+    def import_env(
         self,
         *,
         config_version: str,
@@ -285,6 +429,20 @@ class SystemConfigService:
             config_version=config_version,
             items=updates,
             mask_token="__DSA_IMPORT_LITERAL_MASK__",
+            reload_now=reload_now,
+        )
+
+    def import_desktop_env(
+        self,
+        *,
+        config_version: str,
+        content: str,
+        reload_now: bool = True,
+    ) -> Dict[str, Any]:
+        """Merge imported `.env` assignments for desktop backup compatibility."""
+        return self.import_env(
+            config_version=config_version,
+            content=content,
             reload_now=reload_now,
         )
 
@@ -1227,6 +1385,19 @@ class SystemConfigService:
                 )
             )
 
+        startup_only_bind_keys = submitted_keys & {
+            "WEBUI_HOST",
+            "WEBUI_PORT",
+        }
+        if startup_only_bind_keys:
+            warnings.append(
+                (
+                    f"{', '.join(sorted(startup_only_bind_keys))} 已写入 .env。"
+                    "这些属于启动期监听配置：当前已运行的 WebUI/API 进程不会因为本次保存重新绑定监听地址或端口；"
+                    "请重启当前进程、Docker 容器或服务管理器后生效。"
+                )
+            )
+
         return warnings
 
     @staticmethod
@@ -1467,6 +1638,31 @@ class SystemConfigService:
                 }
             )
 
+        if "allowed_values" in validation and value:
+            delimiter = validation.get("delimiter")
+            raw_values = value.split(delimiter) if delimiter else [value]
+            allowed_values = {str(item).strip().lower() for item in validation["allowed_values"]}
+            invalid_values = []
+            seen_invalid = set()
+            for raw_item in raw_values:
+                item = raw_item.strip().lower()
+                if not item:
+                    continue
+                if item not in allowed_values and item not in seen_invalid:
+                    invalid_values.append(item)
+                    seen_invalid.add(item)
+            if invalid_values:
+                issues.append(
+                    {
+                        "key": key,
+                        "code": "invalid_allowed_value",
+                        "message": "Value contains unsupported item(s)",
+                        "severity": "error",
+                        "expected": ",".join(str(item) for item in validation["allowed_values"]),
+                        "actual": ", ".join(invalid_values),
+                    }
+                )
+
         if validation.get("item_type") == "url":
             delimiter = validation.get("delimiter", ",")
             values = [item.strip() for item in value.split(delimiter)] if validation.get("multi_value") else [value.strip()]
@@ -1544,6 +1740,282 @@ class SystemConfigService:
     @staticmethod
     def _split_csv(value: str) -> List[str]:
         return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+    def _build_notification_test_effective_map(
+        self,
+        *,
+        items: Sequence[Dict[str, str]],
+        mask_token: str,
+    ) -> Dict[str, str]:
+        """Merge saved/runtime config with unsaved notification test items."""
+        allowed_keys = set(self._NOTIFICATION_TEST_KEY_MAP)
+        effective = {
+            key: value
+            for key, value in self._build_display_config_map(self._manager.read_config_map()).items()
+            if key in allowed_keys
+        }
+
+        for raw_key, raw_value in os.environ.items():
+            key = str(raw_key).upper()
+            if key in allowed_keys:
+                effective[key] = "" if raw_value is None else str(raw_value)
+
+        for item in items:
+            key = str(item.get("key", "")).strip().upper()
+            if key not in allowed_keys:
+                continue
+            value = "" if item.get("value") is None else str(item.get("value"))
+            if value == mask_token:
+                continue
+            effective[key] = value
+
+        return effective
+
+    def _get_missing_notification_test_keys(
+        self,
+        channel: str,
+        effective_map: Dict[str, str],
+    ) -> List[str]:
+        """Return missing keys for a channel, honoring alternative key groups."""
+        groups = self._NOTIFICATION_REQUIRED_KEY_GROUPS.get(channel, ())
+        if not groups:
+            return []
+
+        missing_by_group: List[List[str]] = []
+        for group in groups:
+            missing = [key for key in group if not (effective_map.get(key) or "").strip()]
+            if not missing:
+                return []
+            missing_by_group.append(missing)
+
+        return missing_by_group[0] if missing_by_group else []
+
+    def _build_notification_test_config(self, effective_map: Dict[str, str]) -> Config:
+        """Build an isolated Config instance for notification testing."""
+        kwargs: Dict[str, Any] = {"stock_list": []}
+        for key, (attr, value_type) in self._NOTIFICATION_TEST_KEY_MAP.items():
+            if key not in effective_map:
+                continue
+            if key == "DISCORD_CHANNEL_ID" and (effective_map.get("DISCORD_MAIN_CHANNEL_ID") or "").strip():
+                continue
+            raw_value = effective_map.get(key, "")
+            kwargs[attr] = self._parse_notification_test_value(key, raw_value, value_type)
+        return Config(**kwargs)
+
+    def _parse_notification_test_value(self, key: str, value: str, value_type: str) -> Any:
+        if value_type == "csv":
+            return self._split_csv(value)
+        if value_type == "bool":
+            return parse_env_bool(value, default=True)
+        if value_type == "int":
+            defaults = {
+                "WECHAT_MAX_BYTES": 4000,
+                "FEISHU_MAX_BYTES": 20000,
+                "DISCORD_MAX_WORDS": 2000,
+            }
+            return parse_env_int(value, defaults.get(key, 0), field_name=key, minimum=1)
+        stripped = (value or "").strip()
+        return stripped or None
+
+    def _dispatch_notification_test(
+        self,
+        *,
+        channel: str,
+        config: Config,
+        effective_map: Dict[str, str],
+        title: str,
+        content: str,
+        timeout_seconds: float,
+    ) -> Dict[str, Any]:
+        from src.notification_sender import (
+            AstrbotSender,
+            CustomWebhookSender,
+            DiscordSender,
+            EmailSender,
+            FeishuSender,
+            PushoverSender,
+            PushplusSender,
+            Serverchan3Sender,
+            SlackSender,
+            TelegramSender,
+            WechatSender,
+        )
+
+        started_at = time.perf_counter()
+        target = self._resolve_notification_test_target(channel, effective_map)
+        titled_content = self._build_notification_test_content(title, content)
+
+        if channel == "custom":
+            attempts = CustomWebhookSender(config).test_custom_webhooks(
+                titled_content,
+                timeout_seconds=timeout_seconds,
+            )
+            latency_ms = int((time.perf_counter() - started_at) * 1000)
+            success = any(bool(attempt.get("success")) for attempt in attempts)
+            return self._build_notification_test_result(
+                success=success,
+                message="自定义 Webhook 通知测试成功" if success else "自定义 Webhook 通知测试失败",
+                error_code=None if success else "send_failed",
+                stage="notification_send",
+                retryable=any(bool(attempt.get("retryable")) for attempt in attempts),
+                latency_ms=latency_ms,
+                attempts=attempts,
+            )
+
+        dispatch = {
+            "wechat": lambda: WechatSender(config).send_to_wechat(titled_content, timeout_seconds=timeout_seconds),
+            "feishu": lambda: FeishuSender(config).send_to_feishu(titled_content, timeout_seconds=timeout_seconds),
+            "telegram": lambda: TelegramSender(config).send_to_telegram(titled_content, timeout_seconds=timeout_seconds),
+            "email": lambda: EmailSender(config).send_to_email(content, subject=title, timeout_seconds=timeout_seconds),
+            "pushover": lambda: PushoverSender(config).send_to_pushover(content, title=title, timeout_seconds=timeout_seconds),
+            "pushplus": lambda: PushplusSender(config).send_to_pushplus(content, title=title, timeout_seconds=timeout_seconds),
+            "serverchan3": lambda: Serverchan3Sender(config).send_to_serverchan3(content, title=title, timeout_seconds=timeout_seconds),
+            "discord": lambda: DiscordSender(config).send_to_discord(titled_content, timeout_seconds=timeout_seconds),
+            "slack": lambda: SlackSender(config).send_to_slack(titled_content, timeout_seconds=timeout_seconds),
+            "astrbot": lambda: AstrbotSender(config).send_to_astrbot(titled_content, timeout_seconds=timeout_seconds),
+        }
+
+        ok = bool(dispatch[channel]())
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        attempt = {
+            "channel": channel,
+            "success": ok,
+            "message": "通知测试发送成功" if ok else "通知测试发送失败",
+            "target": target,
+            "error_code": None if ok else "send_failed",
+            "stage": "notification_send",
+            "retryable": False,
+            "latency_ms": latency_ms,
+        }
+        return self._build_notification_test_result(
+            success=ok,
+            message=f"{channel} 通知测试成功" if ok else f"{channel} 通知测试失败",
+            error_code=None if ok else "send_failed",
+            stage="notification_send",
+            retryable=False,
+            latency_ms=latency_ms,
+            attempts=[attempt],
+        )
+
+    @staticmethod
+    def _build_notification_test_content(title: str, content: str) -> str:
+        title = title.strip()
+        content = content.strip()
+        return f"{title}\n\n{content}" if title else content
+
+    def _resolve_notification_test_target(self, channel: str, effective_map: Dict[str, str]) -> str:
+        for key in self._NOTIFICATION_TEST_TARGET_KEYS.get(channel, ()):
+            raw_value = (effective_map.get(key) or "").strip()
+            if not raw_value:
+                continue
+            if key == "CUSTOM_WEBHOOK_URLS":
+                first_url = self._split_csv(raw_value)[0] if self._split_csv(raw_value) else ""
+                return self._mask_notification_target(first_url, source_key=key)
+            return self._mask_notification_target(raw_value, source_key=key)
+        return channel
+
+    @classmethod
+    def _build_notification_test_result(
+        cls,
+        *,
+        success: bool,
+        message: str,
+        error_code: Optional[str],
+        stage: Optional[str],
+        retryable: bool,
+        latency_ms: Optional[int],
+        attempts: Sequence[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        sanitized_attempts = [cls._sanitize_notification_attempt(attempt) for attempt in attempts]
+        return {
+            "success": success,
+            "message": cls._sanitize_notification_text(message),
+            "error_code": error_code,
+            "stage": stage,
+            "retryable": retryable,
+            "latency_ms": latency_ms,
+            "attempts": sanitized_attempts,
+        }
+
+    @classmethod
+    def _sanitize_notification_attempt(cls, attempt: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized = dict(attempt)
+        if "message" in sanitized:
+            sanitized["message"] = cls._sanitize_notification_text(sanitized["message"])
+        if "target" in sanitized:
+            sanitized["target"] = cls._mask_notification_target(str(sanitized.get("target") or ""))
+        return sanitized
+
+    @classmethod
+    def _sanitize_notification_text(cls, text: Any) -> str:
+        sanitized = cls._sanitize_llm_error_text(text)
+        if not sanitized:
+            return ""
+        sanitized = re.sub(r"(?i)(bearer\s+)[a-z0-9._\-:]+", r"\1[REDACTED]", sanitized)
+        sanitized = re.sub(r"(?i)(token|secret|password|sendkey)([=:]\s*)[^\s,;&]+", r"\1\2[REDACTED]", sanitized)
+        sanitized = re.sub(
+            r"https?://[^\s]+",
+            lambda match: cls._mask_notification_target(match.group(0)),
+            sanitized,
+        )
+        return sanitized[:300]
+
+    @staticmethod
+    def _mask_notification_target(target: str, *, source_key: Optional[str] = None) -> str:
+        value = (target or "").strip()
+        if not value:
+            return ""
+        source_key_upper = (source_key or "").upper()
+        sensitive_source = any(
+            marker in source_key_upper
+            for marker in ("TOKEN", "PASSWORD", "SECRET", "SENDKEY", "USER_KEY", "API_KEY")
+        )
+        parsed = urlparse(value)
+        if not parsed.scheme or not parsed.netloc:
+            if sensitive_source:
+                return "***"
+            if len(value) > 10:
+                return f"{value[:3]}***{value[-2:]}"
+            return value
+
+        safe_netloc = parsed.netloc.rsplit("@", 1)[-1]
+        safe_segments: List[str] = []
+        for segment in parsed.path.split("/"):
+            if not segment:
+                safe_segments.append(segment)
+                continue
+            lower = segment.lower()
+            looks_secret = (
+                len(segment) >= 16
+                or lower.startswith("bot")
+                or "token" in lower
+                or "sendkey" in lower
+                or "secret" in lower
+                or re.search(r"[a-zA-Z].*\d|\d.*[a-zA-Z]", segment) is not None and len(segment) >= 10
+            )
+            if looks_secret:
+                safe_segments.append("***")
+            else:
+                safe_segments.append(segment)
+
+        query = ""
+        if parsed.query:
+            query = "&".join(
+                f"{part.split('=', 1)[0]}=***" if "=" in part else "***"
+                for part in parsed.query.split("&")
+                if part
+            )
+        return urlunparse(parsed._replace(netloc=safe_netloc, path="/".join(safe_segments), query=query, fragment=""))
+
+    @staticmethod
+    def _classify_notification_exception(exc: Exception) -> Tuple[str, bool]:
+        if isinstance(exc, requests.exceptions.Timeout):
+            return "timeout", True
+        if isinstance(exc, requests.exceptions.ConnectionError):
+            return "network_error", True
+        if isinstance(exc, requests.exceptions.RequestException):
+            return "network_error", True
+        return "unexpected_error", False
 
     @staticmethod
     def _setup_check(
@@ -2142,7 +2614,7 @@ class SystemConfigService:
     @staticmethod
     def _classify_llm_http_error(status_code: int, error_text: str) -> _LLMDiagnostic:
         lowered = (error_text or "").lower()
-        if "model" in lowered and any(token in lowered for token in ("not authorized", "not allowed", "access denied", "permission denied")):
+        if SystemConfigService._has_model_access_denied_signal(error_text or ""):
             return _LLMDiagnostic(
                 "model_not_found",
                 False,
@@ -2156,8 +2628,6 @@ class SystemConfigService:
                 "Configured model could not be found on this channel",
                 "model_not_found",
             )
-        if status_code in {401, 403} or any(token in lowered for token in ("unauthorized", "forbidden", "invalid api key", "authentication")):
-            return _LLMDiagnostic("auth", False, "LLM authentication failed", "api_key_rejected")
         if status_code == 402 or any(token in lowered for token in ("billing", "balance", "insufficient balance")):
             return _LLMDiagnostic(
                 "quota",
@@ -2179,6 +2649,22 @@ class SystemConfigService:
                 "LLM request was rejected by quota or rate limiting",
                 "rate_limit",
             )
+        if SystemConfigService._has_transport_blocked_signal(error_text or ""):
+            return _LLMDiagnostic(
+                "network_error",
+                True,
+                "LLM request failed before a valid response was returned",
+                "network_error",
+            )
+        if SystemConfigService._has_request_blocked_signal(error_text or ""):
+            return _LLMDiagnostic(
+                "request_blocked",
+                False,
+                "LLM request was blocked by provider or gateway policy",
+                "provider_blocked",
+            )
+        if status_code in {401, 403} or any(token in lowered for token in ("unauthorized", "forbidden", "invalid api key", "authentication")):
+            return _LLMDiagnostic("auth", False, "LLM authentication failed", "api_key_rejected")
         if status_code == 404:
             return _LLMDiagnostic(
                 "network_error",
@@ -2215,6 +2701,60 @@ class SystemConfigService:
                 return True
 
         return False
+
+    @staticmethod
+    def _has_model_access_denied_signal(text: str) -> bool:
+        lowered = text.lower()
+        if "model" not in lowered:
+            return False
+
+        # Best-effort classifier for observed provider messages. Keep it gated by
+        # an explicit "model" mention plus access/disabled/unavailable signals so
+        # unrelated provider-specific failures continue to use the fallback path.
+        access_denied_tokens = (
+            "not authorized",
+            "not allowed",
+            "access denied",
+            "permission denied",
+            "model disabled",
+            "model is disabled",
+            "disabled model",
+            "model has been disabled",
+            "model not enabled",
+            "model not available",
+            "model is not available",
+        )
+        return any(token in lowered for token in access_denied_tokens)
+
+    @staticmethod
+    def _has_request_blocked_signal(text: str) -> bool:
+        lowered = text.lower()
+        if SystemConfigService._has_transport_blocked_signal(lowered):
+            return False
+        blocked_tokens = (
+            "your request was blocked",
+            "the request was blocked",
+            "request blocked by policy",
+            "blocked by policy",
+            "blocked due to policy",
+            "moderation_blocked",
+            "policy_blocked",
+            "请求被拦截",
+        )
+        return any(token in lowered for token in blocked_tokens)
+
+    @staticmethod
+    def _has_transport_blocked_signal(text: str) -> bool:
+        lowered = text.lower()
+        transport_tokens = (
+            "connection blocked",
+            "connection request was blocked",
+            "network blocked",
+            "blocked by network policy",
+            "blocked by firewall",
+            "firewall blocked",
+        )
+        return any(token in lowered for token in transport_tokens)
 
     @staticmethod
     def _has_provider_prefix_mismatch_signal(text: str) -> bool:
@@ -2263,12 +2803,19 @@ class SystemConfigService:
                 "Configured model prefix does not match this channel",
                 "provider_prefix_mismatch",
             )
-        if "model" in text and any(token in text for token in ("not authorized", "not allowed", "access denied", "permission denied")):
+        if SystemConfigService._has_model_access_denied_signal(str(exc)):
             return _LLMDiagnostic(
                 "model_not_found",
                 False,
                 "Configured model is not available for this channel",
                 "model_access_denied",
+            )
+        if SystemConfigService._has_request_blocked_signal(str(exc)):
+            return _LLMDiagnostic(
+                "request_blocked",
+                False,
+                "LLM request was blocked by provider or gateway policy",
+                "provider_blocked",
             )
         if any(token in exc_name for token in ("auth", "permission")) or any(token in text for token in ("unauthorized", "forbidden", "invalid api key", "authentication")):
             return _LLMDiagnostic("auth", False, "LLM authentication failed", "api_key_rejected")
@@ -2287,7 +2834,9 @@ class SystemConfigService:
             return _LLMDiagnostic("network_error", True, "LLM request failed before a valid response was returned", "connection_refused")
         if "ssl" in text or "tls" in text or "certificate" in text:
             return _LLMDiagnostic("network_error", True, "LLM request failed before a valid response was returned", "tls_error")
-        if any(token in exc_name for token in ("connection", "network")) or any(token in text for token in ("connection", "network")):
+        if any(token in exc_name for token in ("connection", "network")) or any(
+            token in text for token in ("connection", "network", "firewall")
+        ):
             return _LLMDiagnostic("network_error", True, "LLM request failed before a valid response was returned", "network_error")
         return _LLMDiagnostic("network_error", False, "LLM channel test failed", "unknown_error")
 
