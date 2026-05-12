@@ -31,7 +31,15 @@ const getOperationBadgeLabel = (advice?: string) => {
   if (normalized.includes('买') || normalized.includes('布局')) {
     return '买入';
   }
-  return normalized.split(/[，。；、\s]/)[0] || '建议';
+  if (normalized.includes('持有') || normalized.includes('持仓')) {
+    return '持有';
+  }
+  if (normalized.includes('加仓')) {
+    return '加仓';
+  }
+  // Fallback: take first clause only, cap at 4 chars
+  const first = normalized.split(/[（(，。；、\s]/)[0] || '建议';
+  return first.length > 4 ? first.slice(0, 4) : first;
 };
 
 export const HistoryListItem: React.FC<HistoryListItemProps> = ({
@@ -90,7 +98,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
                 <Badge
                   variant="default"
                   size="sm"
-                  className={`home-history-sentiment-badge shrink-0 shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200${isTruncated ? ' group-hover/item:opacity-80' : ''}`}
+                  className={`home-history-sentiment-badge shrink-0 max-w-[7rem] truncate shadow-none text-[11px] font-semibold leading-none transition-opacity duration-200${isTruncated ? ' group-hover/item:opacity-80' : ''}`}
                   style={{
                     color: sentimentColor,
                     borderColor: `${sentimentColor}30`,
