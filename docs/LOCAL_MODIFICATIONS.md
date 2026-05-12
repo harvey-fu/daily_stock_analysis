@@ -1,7 +1,7 @@
 # 本地代码修改记录
 
 > 本文件记录所有本地代码修改项，方便与上游合并时对比。
-> 最后更新：2026-05-07
+> 最后更新：2026-05-13
 
 ---
 
@@ -530,6 +530,15 @@ const [marginForm, setMarginForm] = useState({
 | 18 | `api/v1/endpoints/portfolio.py` | 更新 broker 参数描述 | 2026-05-07 |
 | 19 | `apps/dsa-web/src/pages/PortfolioPage.tsx` | 修复利率输入精度 | 2026-05-07 |
 | 20 | `src/services/portfolio_service.py` | 修复融资融券交易方法调用 | 2026-05-07 |
+| 21 | `src/services/task_queue.py` | 大盘复盘进度回调 | 2026-05-12 |
+| 22 | `src/market_analyzer.py` | 添加进度回调参数 | 2026-05-12 |
+| 23 | `src/core/market_review.py` | 传递进度回调 | 2026-05-12 |
+| 24 | `api/v1/endpoints/analysis.py` | 复盘进度+报告API | 2026-05-12/13 |
+| 25 | `tests/test_analysis_api_contract.py` | 适配新签名 | 2026-05-12 |
+| 26 | `apps/dsa-web/src/api/analysis.ts` | 新增 getLatestMarketReview | 2026-05-13 |
+| 27 | `apps/dsa-web/src/stores/stockPoolStore.ts` | 复盘报告持久化 | 2026-05-13 |
+| 28 | `apps/dsa-web/src/hooks/useHomeDashboardState.ts` | 暴露复盘状态 | 2026-05-13 |
+| 29 | `apps/dsa-web/src/pages/HomePage.tsx` | 复盘卡片+主区域显示 | 2026-05-13 |
 
 ---
 
@@ -554,3 +563,62 @@ const [marginForm, setMarginForm] = useState({
 
 > `.env` 文件不纳入 git 跟踪，拉取上游更新时不会冲突。
 > 其他修改文件需在 git pull 后检查是否有冲突。
+
+---
+
+## 修改八：大盘复盘任务进度回调
+
+**修改时间**：2026-05-12
+
+**修改目的**：大盘复盘任务执行约2分钟，但前端进度一直停留在10%，需要在执行过程中实时更新进度
+
+**涉及文件**：
+
+### 1. `src/services/task_queue.py`
+- `_execute_background_task` 构建 `_on_progress` 闭包传给 `run_task`
+- `submit_background_task` 的 `run_task` 签名改为接受进度回调参数
+
+### 2. `src/market_analyzer.py`
+- `run_daily_review` 新增 `progress_callback` 参数
+- 三步骤前回调：获取概览(20)、搜索新闻(50)、生成报告(70)
+
+### 3. `src/core/market_review.py`
+- `run_market_review` 新增 `progress_callback` 参数，传递给 `run_daily_review`
+- 保存前回调 90
+
+### 4. `api/v1/endpoints/analysis.py`
+- `_run_market_review_background` 接收 `progress_callback` 并传递
+- lambda 适配新签名 `lambda cb: _run_market_review_background(cb, ...)`
+
+### 5. `tests/test_analysis_api_contract.py`
+- 适配新签名，添加 `progress_callback=ANY` 断言
+
+---
+
+## 修改九：大盘复盘报告持久化显示
+
+**修改时间**：2026-05-13
+
+**修改目的**：大盘复盘报告用 `useState` 存储，切换页面后丢失。需要像个股报告一样持久化显示
+
+**涉及文件**：
+
+### 1. `api/v1/endpoints/analysis.py` — 新增 API
+- `GET /api/v1/analysis/market-review/latest` 从 `reports/` 目录读取最新报告
+
+### 2. `apps/dsa-web/src/api/analysis.ts` — 新增方法
+- `getLatestMarketReview()` 调用新 API
+
+### 3. `apps/dsa-web/src/stores/stockPoolStore.ts` — Store 扩展
+- 新增 `marketReviewReport`、`marketReviewDate`、`showMarketReview` 状态
+- 新增 `setMarketReviewReport`、`fetchLatestMarketReview`、`setShowMarketReview` action
+- 页面加载时自动从后端获取最新报告
+
+### 4. `apps/dsa-web/src/hooks/useHomeDashboardState.ts` — Hook 扩展
+- 暴露新增的 market review 状态和 action
+
+### 5. `apps/dsa-web/src/pages/HomePage.tsx` — UI 改造
+- 侧边栏添加大盘复盘卡片（显示日期 + 摘要预览）
+- 点击卡片在主区域显示完整报告
+- 移除旧的 `<pre>` 文本块显示方式
+- 复盘完成结果写入 store，切换页面后保留

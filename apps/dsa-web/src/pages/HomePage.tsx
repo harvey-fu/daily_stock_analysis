@@ -28,7 +28,6 @@ const HomePage: React.FC = () => {
   const [isSubmittingMarketReview, setIsSubmittingMarketReview] = useState(false);
   const [marketReviewNotice, setMarketReviewNotice] = useState<MarketReviewNotice>(null);
   const [marketReviewError, setMarketReviewError] = useState<ParsedApiError | null>(null);
-  const [marketReviewReport, setMarketReviewReport] = useState<string | null>(null);
   const [marketReviewReportCopied, setMarketReviewReportCopied] = useState(false);
   const marketReviewPollTimer = useRef<number | null>(null);
 
@@ -58,6 +57,9 @@ const HomePage: React.FC = () => {
     isLoadingReport,
     activeTasks,
     markdownDrawerOpen,
+    marketReviewReport,
+    marketReviewDate,
+    showMarketReview,
     setQuery,
     clearError,
     loadInitialHistory,
@@ -76,12 +78,19 @@ const HomePage: React.FC = () => {
     removeTask,
     openMarkdownDrawer,
     closeMarkdownDrawer,
+    setMarketReviewReport,
+    fetchLatestMarketReview,
+    setShowMarketReview,
     selectedIds,
   } = useHomeDashboardState();
 
   useEffect(() => {
     document.title = '每日选股分析 - DSA';
   }, []);
+
+  useEffect(() => {
+    void fetchLatestMarketReview();
+  }, [fetchLatestMarketReview]);
 
   useEffect(() => {
     let active = true;
@@ -212,7 +221,8 @@ const HomePage: React.FC = () => {
             const marketReviewText = typeof status.marketReviewReport === 'string'
               ? status.marketReviewReport
               : '';
-            setMarketReviewReport(marketReviewText ? marketReviewText.trim() : null);
+            const today = new Date().toISOString().slice(0, 10);
+            setMarketReviewReport(marketReviewText ? marketReviewText.trim() : null, today);
             setMarketReviewNotice({
               variant: 'success',
               title: '大盘复盘已完成',
@@ -324,16 +334,45 @@ const HomePage: React.FC = () => {
   const sidebarContent = useMemo(
     () => (
       <div className="flex min-h-0 h-full flex-col gap-3 overflow-hidden">
+        {/* 大盘复盘卡片 */}
+        {marketReviewReport ? (
+          <button
+            type="button"
+            className={`dashboard-card w-full cursor-pointer px-3 py-2 text-left transition-all ${
+              showMarketReview ? 'ring-2 ring-accent' : 'hover:ring-1 hover:ring-border'
+            }`}
+            onClick={() => {
+              setShowMarketReview(!showMarketReview);
+              if (!showMarketReview) {
+                setMarketReviewReport(marketReviewReport, marketReviewDate);
+              }
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold text-foreground">大盘复盘</span>
+              {marketReviewDate && (
+                <span className="text-[10px] text-secondary-text">{marketReviewDate}</span>
+              )}
+            </div>
+            <p className="mt-1 line-clamp-2 text-[11px] text-secondary-text">
+              {marketReviewReport.slice(0, 80).replace(/[#*>\-]/g, '').trim()}...
+            </p>
+          </button>
+        ) : null}
+
         <TaskPanel tasks={activeTasks} />
         <HistoryList
           items={historyItems}
           isLoading={isLoadingHistory}
           isLoadingMore={isLoadingMore}
           hasMore={hasMore}
-          selectedId={selectedReport?.meta.id}
+          selectedId={showMarketReview ? undefined : selectedReport?.meta.id}
           selectedIds={selectedIds}
           isDeleting={isDeletingHistory}
-          onItemClick={handleHistoryItemClick}
+          onItemClick={(id) => {
+            setShowMarketReview(false);
+            handleHistoryItemClick(id);
+          }}
           onLoadMore={() => void loadMoreHistory()}
           onToggleItemSelection={toggleHistorySelection}
           onToggleSelectAll={toggleSelectAllVisible}
@@ -351,6 +390,11 @@ const HomePage: React.FC = () => {
       isLoadingMore,
       handleHistoryItemClick,
       loadMoreHistory,
+      marketReviewReport,
+      marketReviewDate,
+      showMarketReview,
+      setMarketReviewReport,
+      setShowMarketReview,
       selectedIds,
       selectedReport?.meta.id,
       toggleHistorySelection,
@@ -500,27 +544,6 @@ const HomePage: React.FC = () => {
           </div>
         ) : null}
 
-        {marketReviewReport ? (
-          <div className="px-3 pb-2 md:px-4">
-            <div className="rounded-xl border border-subtle bg-surface/70 px-3 py-3 text-xs text-secondary-text shadow-sm">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="font-semibold text-foreground">大盘复盘报告</p>
-                <button
-                  type="button"
-                  className="home-surface-button h-7 rounded-md px-3 py-1 text-xs text-foreground"
-                  disabled={marketReviewReportCopied}
-                  onClick={() => void handleCopyMarketReviewReport()}
-                >
-                  {marketReviewReportCopied ? '已复制' : '复制'}
-                </button>
-              </div>
-              <pre className="max-h-64 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-background px-3 py-2 leading-relaxed">
-                {marketReviewReport}
-              </pre>
-            </div>
-          </div>
-        ) : null}
-
         <div className="flex-1 flex min-h-0 overflow-hidden">
           <div className="hidden min-h-0 w-64 shrink-0 flex-col overflow-hidden pl-4 pb-4 md:flex lg:w-72">
             {sidebarContent}
@@ -549,6 +572,41 @@ const HomePage: React.FC = () => {
             {isLoadingReport ? (
               <div className="flex h-full flex-col items-center justify-center">
                 <DashboardStateBlock title="加载报告中..." loading />
+              </div>
+            ) : showMarketReview && marketReviewReport ? (
+              <div className="max-w-4xl space-y-4 pb-8">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">大盘复盘报告</h2>
+                    {marketReviewDate && (
+                      <p className="text-xs text-secondary-text">{marketReviewDate}</p>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="home-action-ai"
+                      size="sm"
+                      disabled={isSubmittingMarketReview}
+                      onClick={() => void handleTriggerMarketReview()}
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      重新复盘
+                    </Button>
+                    <Button
+                      variant="home-action-ai"
+                      size="sm"
+                      disabled={marketReviewReportCopied}
+                      onClick={() => void handleCopyMarketReviewReport()}
+                    >
+                      {marketReviewReportCopied ? '已复制' : '复制'}
+                    </Button>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-subtle bg-surface/70 px-4 py-4 text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
+                  {marketReviewReport}
+                </div>
               </div>
             ) : selectedReport ? (
               <div className="max-w-4xl space-y-4 pb-8">

@@ -1181,26 +1181,35 @@ Market conditions can change quickly. The data above is for reference only and d
 *复盘时间: {datetime.now().strftime('%H:%M')}*
 """
     
-    def run_daily_review(self) -> str:
+    def run_daily_review(self, progress_callback=None) -> str:
         """
         执行每日大盘复盘流程
-        
+
+        Args:
+            progress_callback: 可选的进度回调函数 (progress: int, message: str) -> None
+
         Returns:
             复盘报告文本
         """
         logger.info("========== 开始大盘复盘分析 ==========")
-        
+
         # 1. 获取市场概览
+        if progress_callback:
+            progress_callback(20, "正在获取市场概览...")
         overview = self.get_market_overview()
-        
+
         # 2. 搜索市场新闻
+        if progress_callback:
+            progress_callback(50, "正在搜索市场新闻...")
         news = self.search_market_news()
-        
+
         # 3. 生成复盘报告
+        if progress_callback:
+            progress_callback(70, "正在生成复盘报告...")
         report = self.generate_market_review(overview, news)
-        
+
         logger.info("========== 大盘复盘分析完成 ==========")
-        
+
         return report
 
 

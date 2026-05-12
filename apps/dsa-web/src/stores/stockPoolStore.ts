@@ -50,6 +50,10 @@ export interface StockPoolState {
   isLoadingReport: boolean;
   activeTasks: TaskInfo[];
   markdownDrawerOpen: boolean;
+  marketReviewReport: string | null;
+  marketReviewDate: string | null;
+  isLoadingMarketReview: boolean;
+  showMarketReview: boolean;
   setQuery: (query: string) => void;
   clearError: () => void;
   clearInlineMessages: () => void;
@@ -69,6 +73,9 @@ export interface StockPoolState {
   syncTaskFailed: (task: TaskInfo) => void;
   removeTask: (taskId: string) => void;
   resetDashboardState: () => void;
+  setMarketReviewReport: (content: string | null, date?: string | null) => void;
+  fetchLatestMarketReview: () => Promise<void>;
+  setShowMarketReview: (show: boolean) => void;
 }
 
 const initialState = {
@@ -90,6 +97,10 @@ const initialState = {
   isLoadingReport: false,
   activeTasks: [] as TaskInfo[],
   markdownDrawerOpen: false,
+  marketReviewReport: null as string | null,
+  marketReviewDate: null as string | null,
+  isLoadingMarketReview: false,
+  showMarketReview: false,
 };
 
 function buildHistoryParams(page: number) {
@@ -416,5 +427,35 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     analyzeRequestSeq = 0;
     dismissedTaskIds.clear();
     set({ ...initialState });
+  },
+
+  setMarketReviewReport: (content, date) => {
+    set({
+      marketReviewReport: content,
+      marketReviewDate: date ?? null,
+      showMarketReview: content !== null,
+    });
+  },
+
+  fetchLatestMarketReview: async () => {
+    set({ isLoadingMarketReview: true });
+    try {
+      const result = await analysisApi.getLatestMarketReview();
+      if (result) {
+        set({
+          marketReviewReport: result.content,
+          marketReviewDate: result.date,
+          isLoadingMarketReview: false,
+        });
+      } else {
+        set({ isLoadingMarketReview: false });
+      }
+    } catch {
+      set({ isLoadingMarketReview: false });
+    }
+  },
+
+  setShowMarketReview: (show) => {
+    set({ showMarketReview: show });
   },
 }));

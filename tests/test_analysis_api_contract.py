@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 from tests.litellm_stub import ensure_litellm_stub
 
@@ -190,6 +190,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             return_value=(runtime_notifier, runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review") as run_market_review:
             analysis_endpoint_module._run_market_review_background(
+                lambda p, m: None,
                 send_notification=False,
                 override_region="cn,us",
                 lock_token=None,
@@ -202,6 +203,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             search_service=runtime_search,
             send_notification=False,
             override_region="cn,us",
+            progress_callback=ANY,
         )
 
     def test_market_review_runtime_initializes_analyzer_for_litellm_provider(self) -> None:
@@ -240,6 +242,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             return_value=(runtime_notifier, runtime_analyzer, runtime_search),
         ), patch("src.core.market_review.run_market_review", return_value="report") as run_market_review:
             result = analysis_endpoint_module._run_market_review_background(
+                lambda p, m: None,
                 send_notification=False,
                 override_region="cn",
                 lock_token=None,
@@ -253,6 +256,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             search_service=runtime_search,
             send_notification=False,
             override_region="cn",
+            progress_callback=ANY,
         )
 
     def test_get_analysis_status_returns_market_review_report_from_queue(self) -> None:
@@ -293,6 +297,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         ), patch("src.core.market_review.run_market_review", return_value=None):
             with self.assertRaisesRegex(RuntimeError, "大盘复盘未返回可持久化报告"):
                 analysis_endpoint_module._run_market_review_background(
+                    lambda p, m: None,
                     send_notification=False,
                     override_region="cn",
                     lock_token=None,
@@ -314,6 +319,7 @@ class AnalysisApiContractTestCase(unittest.TestCase):
         ) as release_market_review_lock:
             with self.assertRaises(RuntimeError):
                 analysis_endpoint_module._run_market_review_background(
+                    lambda p, m: None,
                     send_notification=False,
                     override_region="cn",
                     lock_token=lock_token,
@@ -343,7 +349,8 @@ class AnalysisApiContractTestCase(unittest.TestCase):
             side_effect=RuntimeError("runtime init failed"),
         ), patch.object(analysis_endpoint_module, "_release_market_review_lock") as release_market_review_lock:
             task = queue.submit_background_task(
-                lambda: analysis_endpoint_module._run_market_review_background(
+                lambda cb: analysis_endpoint_module._run_market_review_background(
+                    cb,
                     send_notification=False,
                     override_region="cn",
                     lock_token=object(),

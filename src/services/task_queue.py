@@ -412,7 +412,7 @@ class AnalysisTaskQueue:
 
     def submit_background_task(
         self,
-        run_task: Callable[[], Optional[Any]],
+        run_task: Callable[[Callable[[int, str], None]], Optional[Any]],
         *,
         stock_code: str,
         stock_name: Optional[str] = None,
@@ -669,14 +669,14 @@ class AnalysisTaskQueue:
     def _execute_background_task(
         self,
         task_id: str,
-        run_task: Callable[[], Optional[Dict[str, Any]]],
+        run_task: Callable[[Callable[[int, str], None]], Optional[Dict[str, Any]]],
     ) -> Optional[Dict[str, Any]]:
         """
         执行通用后台任务（支持自定义运行逻辑）
 
         Args:
             task_id: 任务 ID
-            run_task: 任务执行函数
+            run_task: 任务执行函数，接受一个 progress_callback(progress, message) 参数
 
         Returns:
             任务执行结果字典（可选）
@@ -692,8 +692,11 @@ class AnalysisTaskQueue:
             task.progress = 10
             self._broadcast_event("task_started", task.to_dict())
 
+        def _on_progress(progress: int, message: str) -> None:
+            self.update_task_progress(task_id, progress, message)
+
         try:
-            result = run_task()
+            result = run_task(_on_progress)
             if result is None:
                 raise RuntimeError("任务返回空结果，未生成可持久化内容")
 

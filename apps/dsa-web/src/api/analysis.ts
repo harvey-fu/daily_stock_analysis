@@ -115,6 +115,22 @@ export const analysisApi = {
   },
 
   /**
+   * Get the latest market review report from saved files.
+   */
+  getLatestMarketReview: async (): Promise<{ content: string; date: string; filename: string } | null> => {
+    try {
+      const response = await apiClient.get<Record<string, unknown>>(
+        '/api/v1/analysis/market-review/latest',
+        { validateStatus: (status) => status === 200 || status === 404 },
+      );
+      if (response.status === 404) return null;
+      return toCamelCase<{ content: string; date: string; filename: string }>(response.data);
+    } catch {
+      return null;
+    }
+  },
+
+  /**
    * Get async task status.
    * @param taskId Task ID
    */

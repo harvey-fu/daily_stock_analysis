@@ -53,6 +53,7 @@ def run_market_review(
     send_notification: bool = True,
     merge_notification: bool = False,
     override_region: Optional[str] = None,
+    progress_callback=None,
 ) -> Optional[str]:
     """
     执行大盘复盘分析
@@ -64,6 +65,7 @@ def run_market_review(
         send_notification: 是否发送通知
         merge_notification: 是否合并推送（跳过本次推送，由 main 层合并个股+大盘后统一发送，Issue #190）
         override_region: 覆盖 config 的 market_review_region（Issue #373 交易日过滤后有效子集）
+        progress_callback: 可选的进度回调函数 (progress: int, message: str) -> None
 
     Returns:
         复盘报告文本
@@ -101,7 +103,7 @@ def run_market_review(
                 mkt_analyzer = MarketAnalyzer(
                     search_service=search_service, analyzer=analyzer, region=mkt
                 )
-                mkt_report = mkt_analyzer.run_daily_review()
+                mkt_report = mkt_analyzer.run_daily_review(progress_callback=progress_callback)
                 if mkt_report:
                     parts.append(f"{review_text[title_key]}\n\n{mkt_report}")
             if parts:
@@ -114,9 +116,11 @@ def run_market_review(
                 analyzer=analyzer,
                 region=region,
             )
-            review_report = market_analyzer.run_daily_review()
+            review_report = market_analyzer.run_daily_review(progress_callback=progress_callback)
         
         if review_report:
+            if progress_callback:
+                progress_callback(90, "正在保存报告并推送...")
             # 保存报告到文件
             date_str = datetime.now().strftime('%Y%m%d')
             report_filename = f"market_review_{date_str}.md"

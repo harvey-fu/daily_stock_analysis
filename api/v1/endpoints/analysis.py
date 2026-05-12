@@ -112,6 +112,7 @@ def _build_market_review_runtime(config: Config, source_message: Optional[Any] =
 
 
 def _run_market_review_background(
+    progress_callback,
     send_notification: bool,
     override_region: Optional[str] = None,
     lock_token: Optional[_MarketReviewExecutionLock] = None,
@@ -129,6 +130,7 @@ def _run_market_review_background(
             search_service=search_service,
             send_notification=send_notification,
             override_region=override_region,
+            progress_callback=progress_callback,
         )
         if not report:
             raise RuntimeError("大盘复盘未返回可持久化报告")
@@ -501,7 +503,8 @@ def trigger_market_review(
 
     try:
         task = get_task_queue().submit_background_task(
-            lambda: _run_market_review_background(
+            lambda cb: _run_market_review_background(
+                cb,
                 request.send_notification,
                 override_region=override_region,
                 lock_token=lock_token,
@@ -521,6 +524,53 @@ def trigger_market_review(
         send_notification=request.send_notification,
         task_id=task.task_id,
     )
+
+
+# ============================================================
+# GET /market-review/latest - 获取最新大盘复盘报告
+# ============================================================
+
+@router.get(
+    "/market-review/latest",
+    responses={
+        200: {"description": "最新大盘复盘报告"},
+        404: {"description": "无可用报告", "model": ErrorResponse},
+    },
+    summary="获取最新大盘复盘报告",
+    description="从 reports 目录读取最新的大盘复盘报告文件",
+)
+def get_latest_market_review():
+    """读取最新的大盘复盘报告文件。"""
+    from pathlib import Path
+    import re
+
+    reports_dir = Path(__file__).resolve().parent.parent.parent.parent / "reports"
+    if not reports_dir.is_dir():
+        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "报告目录不存在"})
+
+    pattern = re.compile(r"^market_review_(\d{8})\.md$")
+    candidates = []
+    for f in reports_dir.iterdir():
+        m = pattern.match(f.name)
+        if m and f.is_file():
+            candidates.append((m.group(1), f))
+
+    if not candidates:
+        raise HTTPException(status_code=404, detail={"error": "not_found", "message": "暂无大盘复盘报告"})
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    date_str, filepath = candidates[0]
+
+    try:
+        content = filepath.read_text(encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail={"error": "read_error", "message": str(exc)})
+
+    return {
+        "content": content,
+        "date": f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}",
+        "filename": filepath.name,
+    }
 
 
 # ============================================================

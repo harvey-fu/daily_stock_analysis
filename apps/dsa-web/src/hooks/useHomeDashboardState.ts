@@ -24,6 +24,10 @@ export function useHomeDashboardState() {
       isLoadingReport: state.isLoadingReport,
       activeTasks: state.activeTasks,
       markdownDrawerOpen: state.markdownDrawerOpen,
+      marketReviewReport: state.marketReviewReport,
+      marketReviewDate: state.marketReviewDate,
+      isLoadingMarketReview: state.isLoadingMarketReview,
+      showMarketReview: state.showMarketReview,
       notify: state.notify,
       setQuery: state.setQuery,
       setNotify: state.setNotify,
@@ -42,6 +46,9 @@ export function useHomeDashboardState() {
       removeTask: state.removeTask,
       openMarkdownDrawer: state.openMarkdownDrawer,
       closeMarkdownDrawer: state.closeMarkdownDrawer,
+      setMarketReviewReport: state.setMarketReviewReport,
+      fetchLatestMarketReview: state.fetchLatestMarketReview,
+      setShowMarketReview: state.setShowMarketReview,
     })),
   );
 
